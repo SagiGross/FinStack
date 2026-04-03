@@ -137,7 +137,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div class="sb-user"><div><div class="sb-user-name" id="userName"></div><div class="sb-user-role" id="userRole"></div></div><button class="sb-logout" id="logoutBtn">Logout</button></div>
   </div>
   <div class="main">
-    <div class="hdr"><div class="hdr-kpis" id="hdrK"></div><button class="tog" id="togBtn"><div class="tog-track on" id="togT"><div class="tog-thumb"></div></div><span id="togL">Weighted</span></button></div>
+    <div class="hdr"><div class="hdr-kpis" id="hdrK"></div><div style="display:flex;gap:10px;align-items:center"><div id="rateBox" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid var(--bdL);background:var(--cardH);font-size:12px"><span style="color:var(--txM)">$/\u20AA</span><span id="rateValue" class="mono" style="font-weight:700;font-size:13px"></span><span id="rateLock" style="font-size:9px;color:var(--txM);margin-left:2px"></span></div><button class="tog" id="togBtn"><div class="tog-track on" id="togT"><div class="tog-thumb"></div></div><span id="togL">Weighted</span></button></div></div>
     <div class="content" id="mainContent"></div>
   </div>
 </div>
@@ -152,9 +152,33 @@ var MO=['01','02','03','04','05','06','07','08','09','10','11','12'];
 function fmt(n){if(n==null)return'\u2014';var a=Math.abs(n);if(a>=1e6)return'$'+(n/1e6).toFixed(2)+'M';if(a>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
 function fmtP(n){return n==null?'\u2014':n.toFixed(1)+'%'}
 function fmtDate(d){if(!d)return'';try{var dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}catch(e){return d}}
+
+// Searchable table: wraps a tw div with a search input
+function makeSearchable(tableBodyId){
+  var tbody=document.getElementById(tableBodyId);
+  if(!tbody)return;
+  var tw=tbody.closest('.tw');
+  if(!tw||tw.querySelector('.search-box'))return;
+  var header=tw.querySelector('.tw-h');
+  if(!header)return;
+  var box=document.createElement('div');
+  box.className='search-box';
+  box.style.cssText='padding:0 16px 10px;border-bottom:1px solid var(--bd)';
+  box.innerHTML='<input type="text" placeholder="Search..." style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;color:var(--tx);font-family:var(--f);font-size:12px;outline:none" data-target="'+tableBodyId+'">';
+  header.after(box);
+  box.querySelector('input').addEventListener('input',function(){
+    var q=this.value.toLowerCase();
+    var rows=document.querySelectorAll('#'+tableBodyId+' tr');
+    rows.forEach(function(row){
+      if(row.classList.contains('sp-detail')||row.classList.contains('sp-detail2'))return;
+      var txt=row.textContent.toLowerCase();
+      row.style.display=(!q||txt.indexOf(q)!==-1)?'':'none';
+    });
+  });
+}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(function(){t.style.display='none'},2500)}
 function kpi(ic,lb,vl,sb,co,dl){return'<div class="kpi" style="animation-delay:'+(dl||0)+'ms"><div class="kpi-g" style="background:'+co+'"></div><div class="kpi-h"><div class="kpi-i" style="background:'+co+'18;color:'+co+'">'+ic+'</div><span class="kpi-l">'+lb+'</span></div><div class="kpi-v">'+vl+'</div><div class="kpi-s">'+sb+'</div></div>'}
-function mk(id,cfg){if(charts[id])charts[id].destroy();var c=document.getElementById(id);if(!c)return;Chart.defaults.font.family="'Outfit',system-ui,sans-serif";Chart.defaults.color='#94a3b8';var o=cfg.options||{};o.responsive=true;o.maintainAspectRatio=false;if(!o.plugins)o.plugins={};if(!o.scales)o.scales={};if(!o.scales.x)o.scales.x={};if(!o.scales.y)o.scales.y={};o.scales.x.grid={color:'#1e293b',drawBorder:false};o.scales.x.ticks=Object.assign({font:{size:10,family:"var(--fm)"}},o.scales.x.ticks||{});o.scales.y.grid={color:'#1e293b',drawBorder:false};o.scales.y.ticks=Object.assign({font:{size:10,family:"var(--fm)"},callback:function(v){return fmt(v)}},o.scales.y.ticks||{});cfg.options=o;charts[id]=new Chart(c,cfg)}
+function mk(id,cfg){if(charts[id])charts[id].destroy();var c=document.getElementById(id);if(!c)return;Chart.defaults.font.family="'Outfit',system-ui,sans-serif";Chart.defaults.color='#94a3b8';var o=cfg.options||{};o.responsive=true;o.maintainAspectRatio=false;if(!o.plugins)o.plugins={};if(!o.scales)o.scales={};if(!o.scales.x)o.scales.x={};if(!o.scales.y)o.scales.y={};var isHoriz=o.indexAxis==='y';o.scales.x.grid={color:'#1e293b',drawBorder:false};if(!isHoriz){o.scales.x.ticks=Object.assign({font:{size:10,family:"var(--fm)"}},o.scales.x.ticks||{});o.scales.y.grid={color:'#1e293b',drawBorder:false};o.scales.y.ticks=Object.assign({font:{size:10,family:"var(--fm)"},callback:function(v){return fmt(v)}},o.scales.y.ticks||{})}else{o.scales.x.ticks=Object.assign({font:{size:10,family:"var(--fm)"},callback:function(v){return fmt(v)}},o.scales.x.ticks||{});o.scales.y.grid={color:'#1e293b',drawBorder:false};o.scales.y.ticks=Object.assign({font:{size:11}},o.scales.y.ticks||{})}cfg.options=o;charts[id]=new Chart(c,cfg)}
 function authFetch(url,opts){opts=opts||{};if(!opts.headers)opts.headers={};if(TOKEN)opts.headers['Authorization']='Bearer '+TOKEN;return fetch(url,opts)}
 
 // ── Auth ──
@@ -163,10 +187,17 @@ function bootApp(){
   USER=JSON.parse(localStorage.getItem('fst_user')||'null');
   if(TOKEN&&USER){showApp()}else{showLogin()}
 }
-function showLogin(){document.getElementById('loginScreen').style.display='flex';document.getElementById('appShell').style.display='none'}
+function showLogin(){
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('appShell').style.display='none';
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+  document.getElementById('loginErr').style.display='none';
+}
 function showApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('appShell').style.display='block';
   document.getElementById('userName').textContent=USER.name;document.getElementById('userRole').textContent=USER.role;
+  if(USER.role==='admin'){/* rate box always visible */}
   buildNav();loadAll().then(renderAll);
 }
 document.getElementById('loginBtn').addEventListener('click',doLogin);
@@ -175,7 +206,7 @@ function doLogin(){
   var u=document.getElementById('loginUser').value,p=document.getElementById('loginPass').value;
   fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
   .then(function(r){if(!r.ok)throw new Error();return r.json()})
-  .then(function(d){TOKEN=d.token;USER={role:d.role,name:d.name,id:d.userId};localStorage.setItem('fst_token',TOKEN);localStorage.setItem('fst_user',JSON.stringify(USER));showApp()})
+  .then(function(d){TOKEN=d.token;USER={role:d.role,name:d.name,id:d.userId,canSeeAll:d.canSeeAll};localStorage.setItem('fst_token',TOKEN);localStorage.setItem('fst_user',JSON.stringify(USER));showApp()})
   .catch(function(){document.getElementById('loginErr').style.display='block'});
 }
 document.getElementById('logoutBtn').addEventListener('click',function(){localStorage.removeItem('fst_token');localStorage.removeItem('fst_user');TOKEN=null;USER=null;showLogin()});
@@ -185,7 +216,9 @@ document.getElementById('togBtn').addEventListener('click',function(){W=!W;docum
 function buildNav(){
   var items=[];
   if(USER.role==='admin'){
-    items=[{id:'dashboard',label:'Dashboard',icon:'&#9632;'},{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'settings',label:'Settings',icon:'&#9632;'}];
+    items=[{id:'dashboard',label:'Dashboard',icon:'&#9632;'},{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'settings',label:'Detailed Info',icon:'&#9632;'}];
+  }else if(USER.role==='sales_manager'){
+    items=[{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'salesdash',label:'Sales Dashboard',icon:'&#9632;'},{id:'team',label:'Team Settings',icon:'&#9632;'}];
   }else{
     items=[{id:'sales',label:'My Pipeline',icon:'&#9632;'},{id:'salesdash',label:'Sales Dashboard',icon:'&#9632;'}];
   }
@@ -214,6 +247,7 @@ function renderPage(){
   else if(currentPage==='sales')renderSalesPipeline(c);
   else if(currentPage==='salesdash')renderSalesDash(c);
   else if(currentPage==='settings')renderSettings(c);
+  else if(currentPage==='team')renderTeamSettings(c);
   setTimeout(function(){Object.values(charts).forEach(function(ch){try{ch.resize()}catch(e){}})},150);
 }
 function renderAll(){renderHeader();renderPage()}
@@ -223,6 +257,13 @@ function renderHeader(){
   var items=USER.role==='admin'?[{l:'Cash',v:fmt(last.cumCash),c:last.cumCash>=0?'var(--gn)':'var(--rd)'},{l:'Burn/mo',v:fmt(ab),c:'var(--am)'},{l:'Runway',v:last.runway?last.runway.toFixed(1)+' mo':'\u221e',c:'var(--cy)'},{l:'FY Rev',v:fmt(tr),c:'var(--gn)'}]:[{l:'Pipeline',v:fmt(D.contracts.reduce(function(s,c){return s+c.value},0)),c:'var(--ac)'},{l:'Weighted',v:fmt(D.contracts.reduce(function(s,c){return s+c.weighted},0)),c:'var(--gn)'},{l:'Deals',v:D.contracts.length+'',c:'var(--am)'}];
   var h='';items.forEach(function(k){h+='<div class="hdr-k"><div style="color:'+k.c+';font-size:14px">\u25CF</div><div><div class="hdr-k-l">'+k.l+'</div><div class="hdr-k-v" style="color:'+k.c+'">'+k.v+'</div></div></div>'});
   document.getElementById('hdrK').innerHTML=h;
+  if(D.exchangeRate&&document.getElementById('rateValue')){
+    document.getElementById('rateValue').textContent=D.exchangeRate.toFixed(2);
+    var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var now=new Date();
+    var curMo=months[now.getMonth()];
+    document.getElementById('rateLock').innerHTML='<span style="color:var(--gn)">\u25CF</span> Live for '+curMo+'+';
+  }
 }
 
 // ══════════════════════════════════════════
@@ -237,44 +278,152 @@ function renderAdminDashboard(el){
 }
 
 function renderFinancial(){
-  var d=D.summary,tr=d.reduce(function(s,m){return s+m.revenue},0),tc=d.reduce(function(s,m){return s+m.cogs},0),tn=d.reduce(function(s,m){return s+m.netIncome},0),ab=d.reduce(function(s,m){return s+m.totalExp},0)/12,ag=d.reduce(function(s,m){return s+m.grossMargin},0)/12,last=d[d.length-1];
-  var h='<div class="kg kg6">'+kpi('\u2197','Revenue',fmt(tr),'FY 2026','var(--gn)')+kpi('\u2593','Gross Margin',fmtP(ag),'COGS '+fmt(tc),'var(--am)',50)+kpi('$','Net Income',fmt(tn),'After OpEx',tn>=0?'var(--gn)':'var(--rd)',100)+kpi('\u2248','Avg Burn',fmt(ab),'Monthly','var(--pu)',150)+kpi('\u2587','End Cash',fmt(last.cumCash),'Dec 2026','var(--ac)',200)+kpi('\u23F1','Runway',last.runway?last.runway.toFixed(1)+' mo':'\u221e','Current rate','var(--cy)',250)+'</div>';
-  h+='<div class="cg cg2"><div class="cc"><div class="cc-t">Monthly P&L</div><div style="height:280px"><canvas id="chPL"></canvas></div></div><div class="cc"><div class="cc-t">Cash Position</div><div style="height:280px"><canvas id="chCash"></canvas></div></div></div>';
-  h+='<div class="cg cg2"><div class="cc"><div class="cc-t">Gross Margin %</div><div style="height:260px"><canvas id="chGM"></canvas></div></div><div class="cc"><div class="cc-t">Monthly Burn</div><div style="height:260px"><canvas id="chBurn"></canvas></div></div></div>';
+  var d=D.summary;
+  var tr=d.reduce(function(s,m){return s+m.revenue},0);
+  var tc=d.reduce(function(s,m){return s+m.cogs},0);
+  var tgp=d.reduce(function(s,m){return s+m.grossProfit},0);
+  var tn=d.reduce(function(s,m){return s+m.netIncome},0);
+  var ab=d.reduce(function(s,m){return s+m.totalExp},0)/12;
+  var ag=tr>0?tgp/tr*100:0;
+  var last=d[d.length-1];
+  var h='<div class="kg kg6">';
+  h+=kpi('\u2197','Revenue',fmt(tr),'FY 2026','var(--gn)');
+  h+=kpi('\u2593','Gross Profit',fmt(tgp),fmtP(ag)+' margin','var(--am)',50);
+  h+=kpi('$','Net Income',fmt(tn),'After OpEx',tn>=0?'var(--gn)':'var(--rd)',100);
+  h+=kpi('\u2248','Avg Burn',fmt(ab),'Monthly','var(--pu)',150);
+  h+=kpi('\u2587','End Cash',fmt(last.cumCash),'Dec 2026','var(--ac)',200);
+  h+=kpi('\u23F1','Runway',last.runway?last.runway.toFixed(1)+' mo':'\u221e','Current rate','var(--cy)',250);
+  h+='</div>';
+  h+='<div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t">Monthly P&L</div><div style="height:280px"><canvas id="chPL"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Cash Position</div><div style="height:280px"><canvas id="chCash"></canvas></div></div>';
+  h+='</div>';
+  h+='<div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t">Gross Profit & Margin %</div><div style="height:260px"><canvas id="chGM"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Monthly Burn</div><div style="height:260px"><canvas id="chBurn"></canvas></div></div>';
+  h+='</div>';
   document.getElementById('st-fin').innerHTML=h;
-  mk('chPL',{type:'bar',data:{labels:MO,datasets:[{label:'Revenue',data:d.map(function(m){return m.revenue}),backgroundColor:'#10b981cc',borderRadius:5,order:2},{label:'COGS',data:d.map(function(m){return m.cogs}),backgroundColor:'#f59e0bbb',borderRadius:5,order:2},{label:'OpEx',data:d.map(function(m){return m.opex}),backgroundColor:'#8b5cf6aa',borderRadius:5,order:2},{label:'Net',data:d.map(function(m){return m.netIncome}),type:'line',borderColor:'#06b6d4',borderWidth:2.5,pointRadius:0,tension:.4,order:1}]}});
-  mk('chCash',{type:'bar',data:{labels:MO,datasets:[{label:'In',data:d.map(function(m){return m.cashIn}),backgroundColor:'#10b981aa',borderRadius:4,order:2},{label:'Out',data:d.map(function(m){return m.cashOut}),backgroundColor:'#ef444488',borderRadius:4,order:2},{label:'Cumulative',data:d.map(function(m){return m.cumCash}),type:'line',borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.1)',fill:true,borderWidth:2.5,pointRadius:0,tension:.4,order:1}]}});
-  mk('chGM',{type:'line',data:{labels:MO,datasets:[{label:'GM%',data:d.map(function(m){return m.grossMargin}),borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.1)',fill:true,borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',pointBorderWidth:2,tension:.4}]},options:{scales:{y:{ticks:{callback:function(v){return v+'%'}}}},plugins:{legend:{display:false}}}});
-  mk('chBurn',{type:'bar',data:{labels:MO,datasets:[{label:'Burn',data:d.map(function(m){return m.burnRate}),backgroundColor:d.map(function(m){return m.burnRate>150000?'#ef4444cc':m.burnRate>100000?'#f59e0bcc':'#10b981cc'}),borderRadius:5}]},options:{plugins:{legend:{display:false}}}});
+  mk('chPL',{type:'bar',data:{labels:MO,datasets:[
+    {label:'Revenue',data:d.map(function(m){return m.revenue}),backgroundColor:'#10b981cc',borderRadius:5,order:2},
+    {label:'COGS',data:d.map(function(m){return m.cogs}),backgroundColor:'#f59e0bbb',borderRadius:5,order:2},
+    {label:'OpEx',data:d.map(function(m){return m.opex}),backgroundColor:'#8b5cf6aa',borderRadius:5,order:2},
+    {label:'Net',data:d.map(function(m){return m.netIncome}),type:'line',borderColor:'#06b6d4',borderWidth:2.5,pointRadius:0,tension:.4,order:1}
+  ]}});
+  mk('chCash',{type:'bar',data:{labels:MO,datasets:[
+    {label:'In',data:d.map(function(m){return m.cashIn}),backgroundColor:'#10b981aa',borderRadius:4,order:2},
+    {label:'Out',data:d.map(function(m){return m.cashOut}),backgroundColor:'#ef444488',borderRadius:4,order:2},
+    {label:'Cumulative',data:d.map(function(m){return m.cumCash}),type:'line',borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.1)',fill:true,borderWidth:2.5,pointRadius:0,tension:.4,order:1}
+  ]}});
+  // Gross Profit bar + Margin % line (dual axis)
+  mk('chGM',{type:'bar',data:{labels:MO,datasets:[
+    {label:'Gross Profit',data:d.map(function(m){return m.grossProfit}),backgroundColor:'#10b981aa',borderRadius:5,yAxisID:'y',order:2},
+    {label:'GM%',data:d.map(function(m){return m.grossMargin}),type:'line',borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.1)',fill:true,borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',pointBorderWidth:2,tension:.4,yAxisID:'y1',order:1}
+  ]},options:{scales:{y:{position:'left'},y1:{position:'right',grid:{display:false},ticks:{callback:function(v){return v+'%'}}}}}});
+  mk('chBurn',{type:'bar',data:{labels:MO,datasets:[
+    {label:'Burn',data:d.map(function(m){return m.burnRate}),
+     backgroundColor:d.map(function(m){return m.burnRate>150000?'#ef4444cc':m.burnRate>100000?'#f59e0bcc':'#10b981cc'}),
+     borderRadius:5}
+  ]},options:{plugins:{legend:{display:false}}}});
 }
 
+var salesFilter='all';
 function renderSalesSummary(){
-  var s=SA,sd=s.stageDistribution||{};
-  var h='<div class="kg kg4">'+kpi('\u25CE','Total',fmt(s.total),s.dealCount+' deals','var(--ac)')+kpi('\u2605','Top Sector',s.topType||'\u2014',s.byType[s.topType]?fmt(s.byType[s.topType].total):'','var(--gn)',50)+kpi('\u2609','Top Country',s.topCountry||'\u2014',s.byCountry[s.topCountry]?fmt(s.byCountry[s.topCountry].total):'','var(--cy)',100)+kpi('%','Avg Deal',s.dealCount>0?fmt(s.total/s.dealCount):'\u2014',s.dealCount+' contracts','var(--am)',150)+'</div>';
-  // Stage distribution
-  h+='<div class="kg kg4" style="grid-template-columns:repeat(5,1fr)">';
-  STAGES.forEach(function(st,i){var cnt=sd[st]||0;h+=kpi(['\u260E','\u2709','\u25B6','\u270E','\u2714'][i],st,''+cnt,'deals',['var(--txD)','var(--cy)','var(--ac)','var(--am)','var(--gn)'][i],i*40)});
+  var s=SA,allCons=D.contracts;
+  var spList=[{id:'all',name:'All Salespeople'}];
+  (D.salespeople||[]).forEach(function(sp){spList.push(sp)});
+  var h='<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">';
+  h+='<label style="font-size:12px;font-weight:700;color:var(--txM)">FILTER BY:</label>';
+  h+='<select id="spFilter" style="background:var(--cardH);border:1px solid var(--bd);border-radius:8px;padding:8px 14px;color:var(--tx);font-family:var(--f);font-size:13px;cursor:pointer">';
+  spList.forEach(function(sp){h+='<option value="'+sp.id+'"'+(salesFilter===sp.id?' selected':'')+'>'+sp.name+'</option>'});
+  h+='</select></div>';
+  var cons=salesFilter==='all'?allCons:allCons.filter(function(c){return c.salespersonId===salesFilter});
+  var signed=cons.filter(function(c){return c.stage==='Signed'});
+  var pipeline=cons.filter(function(c){return c.stage!=='Signed'});
+  var signedVal=signed.reduce(function(a,c){return a+c.value},0);
+  var pipVal=pipeline.reduce(function(a,c){return a+c.value},0);
+  var pipW=pipeline.reduce(function(a,c){return a+c.weighted},0);
+  var localSD={};STAGES.forEach(function(st){localSD[st]=0});
+  cons.forEach(function(c){localSD[c.stage]=(localSD[c.stage]||0)+1});
+  var localByType={},localByCountry={};
+  cons.forEach(function(c){
+    var v=W?(c.chance!=null?c.value*c.chance:0):c.value;
+    var isSigned=c.stage==='Signed';var ind=c.industry||'Other';var co=c.country||'Unknown';
+    if(!localByType[ind])localByType[ind]={signed:0,pipeline:0};
+    if(!localByCountry[co])localByCountry[co]={signed:0,pipeline:0};
+    if(isSigned){localByType[ind].signed+=v;localByCountry[co].signed+=v}
+    else{localByType[ind].pipeline+=v;localByCountry[co].pipeline+=v}
+  });
+  h+='<div class="kg kg6">';
+  h+=kpi('\u2714','Signed',fmt(signedVal),signed.length+' deals','var(--gn)');
+  h+=kpi('\u25CE','Pipeline',fmt(pipVal),pipeline.length+' deals','var(--ac)',50);
+  h+=kpi('\u26A1','Pipeline (Wtd)',fmt(pipW),'Weighted','var(--am)',100);
+  h+=kpi('\u2605','Total Deals',''+cons.length,'of '+allCons.length,'var(--pk)',150);
+  h+=kpi('\u2609','Conversion',cons.length>0?fmtP(signed.length/cons.length*100):'\u2014','signed/total','var(--cy)',200);
+  h+=kpi('%','Avg Deal',cons.length>0?fmt((signedVal+pipVal)/cons.length):'\u2014','per deal','var(--pu)',250);
   h+='</div>';
-  h+='<div class="cg cg2"><div class="cc"><div class="cc-t">Revenue by Type</div><div style="height:280px"><canvas id="chST"></canvas></div></div><div class="cc"><div class="cc-t">Revenue by Country</div><div style="height:280px"><canvas id="chSC2"></canvas></div></div></div>';
+  h+='<div class="kg kg4" style="grid-template-columns:repeat(5,1fr)">';
+  STAGES.forEach(function(st,i){h+=kpi(['\u260E','\u2709','\u25B6','\u270E','\u2714'][i],st,''+(localSD[st]||0),'deals',['var(--txD)','var(--cy)','var(--ac)','var(--am)','var(--gn)'][i],i*40)});
+  h+='</div>';
+  h+='<div class="cg" style="grid-template-columns:1fr 1fr 1fr;gap:14px">';
+  h+='<div class="cc"><div class="cc-t">Signed vs Pipeline</div><div style="height:260px"><canvas id="chSvP"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">By Type</div><div style="height:260px"><canvas id="chST"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t" style="justify-content:space-between">By Country <button class="btn-ghost" id="btnExpandCountry" style="padding:4px 12px;font-size:11px">Expand</button></div><div style="height:260px"><canvas id="chSC2"></canvas></div></div></div>';
+  function buildSpTbl(deals,pfx,col,showW){var bySp={};deals.forEach(function(c){var sp=c.salespersonName||'Unassigned';if(!bySp[sp])bySp[sp]={total:0,weighted:0,count:0,deals:[]};bySp[sp].total+=c.value;bySp[sp].weighted+=c.weighted;bySp[sp].count++;bySp[sp].deals.push(c)});var sps=Object.keys(bySp).sort(function(a,b){return bySp[b].total-bySp[a].total});var t='<thead><tr><th>Salesperson</th><th>Deals</th><th>Total</th>'+(showW?'<th>Weighted</th>':'')+'</tr></thead><tbody>';sps.forEach(function(sp){var d=bySp[sp];var k=pfx+sp.replace(/\s/g,'');t+='<tr class="clickrow sp-row" data-sp="'+k+'"><td style="font-weight:700">'+sp+'</td><td class="mono">'+d.count+'</td><td class="mono" style="font-weight:700;color:'+col+'">'+fmt(d.total)+'</td>'+(showW?'<td class="mono" style="color:var(--acL)">'+fmt(d.weighted)+'</td>':'')+'</tr>';var stC={"Initial Contact":"var(--txM)","Email Sent":"var(--cy)","Demo":"var(--ac)","Negotiation":"var(--am)","Signed":"var(--gn)"};d.deals.forEach(function(c){var sc=stC[c.stage]||'var(--txM)';t+='<tr class="sp-detail" data-sp="'+k+'" style="display:none"><td style="padding-left:32px;color:var(--txD)">'+c.client+' <span style="color:var(--txM);font-size:10px">'+c.country+'</span></td><td><span class="pill" style="background:'+sc+'18;color:'+sc+'">'+c.stage+'</span></td><td class="mono">'+fmt(c.value)+'</td>'+(showW?'<td class="mono" style="color:var(--acL)">'+fmt(c.weighted)+'</td>':'')+'</tr>'})});return t+'</tbody>'}
+  h+='<div class="tw"><div class="tw-h" style="color:var(--gn)">\u2714 Signed <span class="ct">'+signed.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table>'+buildSpTbl(signed,'s-','var(--gn)',false)+'</table></div></div>';
+  h+='<div class="tw"><div class="tw-h" style="color:var(--ac)">\u25CE Pipeline <span class="ct">'+pipeline.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table>'+buildSpTbl(pipeline,'p-','var(--ac)',true)+'</table></div></div>';
   document.getElementById('st-sal').innerHTML=h;
-  var tN=Object.keys(s.byType),tV=tN.map(function(t){return s.byType[t].total}),tC=tN.map(function(t){return t==='Government'?'#3b82f6':t==='Enterprise'?'#ec4899':'#10b981'});
-  mk('chST',{type:'doughnut',data:{labels:tN,datasets:[{data:tV,backgroundColor:tC,borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
-  var cN=Object.keys(s.byCountry),cV=cN.map(function(c){return s.byCountry[c].total});
-  mk('chSC2',{type:'bar',data:{labels:cN,datasets:[{label:'Revenue',data:cV,backgroundColor:'#3b82f6',borderRadius:5}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+  document.getElementById('spFilter').addEventListener('change',function(){salesFilter=this.value;renderSalesSummary()});
+  mk('chSvP',{type:'doughnut',data:{labels:['Signed','Pipeline (Wtd)'],datasets:[{data:[signedVal,pipW],backgroundColor:['#10b981','#3b82f6'],borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
+  var tN=Object.keys(localByType);mk('chST',{type:'bar',data:{labels:tN,datasets:[{label:'Signed',data:tN.map(function(t){return localByType[t].signed}),backgroundColor:'#10b981',stack:'s'},{label:'Pipeline',data:tN.map(function(t){return localByType[t].pipeline}),backgroundColor:'#3b82f680',stack:'s'}]},options:{plugins:{legend:{display:true,position:'bottom'}}}});
+  var cN=Object.keys(localByCountry).sort(function(a,b){return(localByCountry[b].signed+localByCountry[b].pipeline)-(localByCountry[a].signed+localByCountry[a].pipeline)}).slice(0,10);
+  mk('chSC2',{type:'bar',data:{labels:cN,datasets:[{label:'Signed',data:cN.map(function(c){return localByCountry[c].signed}),backgroundColor:'#10b981',stack:'s'},{label:'Pipeline',data:cN.map(function(c){return localByCountry[c].pipeline}),backgroundColor:'#3b82f680',stack:'s'}]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}},plugins:{legend:{display:true,position:'bottom'}}}});
+  document.getElementById('btnExpandCountry').addEventListener('click',function(){openCountryBreakdown(cons)});
+  document.querySelectorAll('.sp-row').forEach(function(row){row.addEventListener('click',function(){var sp=this.dataset.sp;var d=document.querySelectorAll('.sp-detail[data-sp="'+sp+'"]');var sh=d[0]&&d[0].style.display!=='none';d.forEach(function(r){r.style.display=sh?'none':'table-row'})})});
 }
+
+
 
 function renderExpensesTab(){
   var d=D.summary,an={"R&D":0,"S&M":0,"G&A":0,"Training":0},depts=["R&D","S&M","G&A","Training"];
   d.forEach(function(m){depts.forEach(function(k){an[k]+=(m.lab[k]||0)+(m.vd[k]||0)})});
+  var totalOpex=d.reduce(function(s,m){return s+m.opex},0);
+  var totalCogs=d.reduce(function(s,m){return s+m.cogs},0);
   var h='<div class="kg kg4">';depts.forEach(function(dept,i){h+=kpi(['\u2692','\u263A','\u2302','\u2709'][i],dept,fmt(an[dept]),'Annual',['var(--ac)','var(--pk)','var(--tl)','var(--am)'][i],i*50)});h+='</div>';
-  h+='<div class="cc"><div class="cc-t">By Department</div><div style="height:280px"><canvas id="chDept"></canvas></div></div>';
-  h+='<div class="tw"><div class="tw-h">Expenses <span class="ct">'+D.expenses.length+'</span></div><div style="overflow-x:auto;max-height:300px"><table><thead><tr><th>Vendor</th><th>Dept</th><th>Monthly</th><th>Type</th></tr></thead><tbody id="expTbl"></tbody></table></div></div>';
+  var expExpanded=false;
+  h+='<div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t" style="justify-content:space-between">Expenses by Department <div><button class="btn-ghost" id="btnDeptMode" style="padding:3px 10px;font-size:10px;margin-right:4px">Grouped</button><button class="btn-ghost" id="btnDeptSide" style="padding:3px 10px;font-size:10px">Side by Side</button></div></div><div style="height:280px"><canvas id="chDept"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">OpEx Only (excl. COGS)</div><div style="height:280px"><canvas id="chOpex"></canvas></div></div>';
+  h+='</div>';
+  h+='<div class="cc"><div class="cc-t" style="justify-content:space-between"><span id="expChTitle">Monthly Expenses (Next 6 Months)</span><button class="btn-ghost" id="btnExpExpand" style="padding:3px 10px;font-size:10px">Expand</button></div><div style="height:240px"><canvas id="chExpMo"></canvas></div></div>';
   document.getElementById('st-exp').innerHTML=h;
-  mk('chDept',{type:'bar',data:{labels:MO,datasets:[{label:'R&D',data:d.map(function(m){return(m.lab["R&D"]||0)+(m.vd["R&D"]||0)}),backgroundColor:'#3b82f6',stack:'s'},{label:'S&M',data:d.map(function(m){return(m.lab["S&M"]||0)+(m.vd["S&M"]||0)}),backgroundColor:'#ec4899',stack:'s'},{label:'G&A',data:d.map(function(m){return(m.lab["G&A"]||0)+(m.vd["G&A"]||0)}),backgroundColor:'#14b8a6',stack:'s'},{label:'Training',data:d.map(function(m){return(m.lab["Training"]||0)+(m.vd["Training"]||0)}),backgroundColor:'#f59e0b',stack:'s',borderRadius:{topLeft:5,topRight:5}}]}});
-  var xr='';D.expenses.forEach(function(x){xr+='<tr class="clickrow" data-xid="'+x.id+'"><td style="font-weight:600">'+x.vendor+'</td><td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td><td class="mono">'+fmt(x.amount)+'/mo</td><td>'+(x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx')+'</td></tr>'});
-  document.getElementById('expTbl').innerHTML=xr;
-  document.querySelectorAll('#expTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var x=D.expenses.find(function(e){return e.id===r.dataset.xid});if(x)openExpenseCard(x)})});
+  var deptStacked=true;
+  function drawDeptChart(){
+    var datasets=depts.map(function(dept,i){return{label:dept,data:d.map(function(m){return(m.lab[dept]||0)+(m.vd[dept]||0)}),backgroundColor:['#3b82f6','#ec4899','#14b8a6','#f59e0b'][i],stack:deptStacked?'s':undefined,borderRadius:deptStacked?0:4}});
+    if(deptStacked)datasets[datasets.length-1].borderRadius={topLeft:5,topRight:5};
+    mk('chDept',{type:'bar',data:{labels:MO,datasets:datasets}});
+  }
+  drawDeptChart();
+  document.getElementById('btnDeptMode').addEventListener('click',function(){deptStacked=true;drawDeptChart()});
+  document.getElementById('btnDeptSide').addEventListener('click',function(){deptStacked=false;drawDeptChart()});
+  mk('chOpex',{type:'bar',data:{labels:MO,datasets:[{label:'OpEx',data:d.map(function(m){return m.opex}),backgroundColor:'#8b5cf6cc',borderRadius:5}]},options:{plugins:{legend:{display:false}}}});
+  var expMo6=true;
+  var curMonth=new Date().getMonth(); // 0-based (0=Jan, 3=Apr)
+  function drawExpMo(){
+    var startIdx=expMo6?curMonth:0;
+    var endIdx=expMo6?Math.min(curMonth+6,12):12;
+    var labels=MO.slice(startIdx,endIdx);
+    var vals=d.slice(startIdx,endIdx);
+    var monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var rangeLabel=monthNames[startIdx]+' - '+monthNames[endIdx-1]+' 2026';
+    document.getElementById('expChTitle').textContent=expMo6?'Monthly Expenses ('+rangeLabel+')':'Monthly Expenses (Full Year)';
+    document.getElementById('btnExpExpand').textContent=expMo6?'Expand':'Collapse';
+    mk('chExpMo',{type:'bar',data:{labels:labels,datasets:[{label:'Total',data:vals.map(function(m){return m.totalExp}),backgroundColor:'#3b82f6cc',borderRadius:5},{label:'COGS',data:vals.map(function(m){return m.cogs}),backgroundColor:'#f59e0b88',borderRadius:5},{label:'OpEx',data:vals.map(function(m){return m.opex}),backgroundColor:'#8b5cf688',borderRadius:5}]}});
+  }
+  drawExpMo();
+  document.getElementById('btnExpExpand').addEventListener('click',function(){expMo6=!expMo6;drawExpMo()});
 }
+
+
 
 function renderScenario(){
   Promise.all([authFetch('/api/data?weighted=true&delay=0&ghosts=0&salary=15000').then(function(r){return r.json()}),authFetch('/api/data?weighted=true&delay='+SD+'&ghosts='+SG+'&salary='+SS).then(function(r){return r.json()})]).then(function(res){
@@ -296,17 +445,121 @@ function renderScenario(){
 // SALES PIPELINE (both admin and sales users)
 // ══════════════════════════════════════════
 function renderSalesPipeline(el){
-  var cons=D.contracts;
-  // Sales users see all but know which are theirs
-  var h='<div class="kg kg3">'+kpi('\u25CE','Total Pipeline',fmt(cons.reduce(function(s,c){return s+c.value},0)),cons.length+' deals','var(--ac)')+kpi('\u26A1','Weighted',fmt(cons.reduce(function(s,c){return s+c.weighted},0)),'Expected','var(--gn)',50)+kpi('\u2714','Signed',cons.filter(function(c){return c.stage==='Signed'}).length+'','deals','var(--am)',100)+'</div>';
-  h+='<div class="tw"><div class="tw-h">All Deals<span class="ct">'+cons.length+'</span></div>';
-  h+='<div style="overflow-x:auto"><table><thead><tr><th>Client</th><th>Country</th><th>Industry</th><th>Value</th><th>Stage</th><th>Salesperson</th><th>Updated</th></tr></thead><tbody id="pipTbl"></tbody></table></div></div>';
+  var allCons=D.contracts;
+  var cons=allCons;
+  if(USER.role==='sales' && !USER.canSeeAll){
+    cons=allCons.filter(function(c){return c.salespersonId===USER.id});
+  }
+  var spOpts='';
+  (D.salespeople||[]).forEach(function(sp){
+    spOpts+='<option value="'+sp.id+'"'+(sp.id===USER.id?' selected':'')+'>'+sp.name+'</option>';
+  });
+
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+  h+='<div style="font-size:20px;font-weight:800">Sales Pipeline</div>';
+  h+='<button class="btn-p" id="btnNewDeal" style="margin:0;padding:10px 20px">+ New Deal</button>';
+  h+='</div>';
+
+  // New deal form (hidden by default)
+  h+='<div id="newDealForm" class="fc" style="display:none">';
+  h+='<h3>Create New Deal</h3>';
+  h+='<div class="fg-grid">';
+  h+='<div class="fg"><label>Client *</label><input id="nd-cl" placeholder="Client name"></div>';
+  h+='<div class="fg"><label>Country</label><input id="nd-co" placeholder="Country"></div>';
+  h+='<div class="fg"><label>Industry</label>';
+  h+='<select id="nd-in"><option>Government</option>';
+  h+='<option>Enterprise</option><option>Academy</option></select></div>';
+  h+='<div class="fg"><label>Value *</label>';
+  h+='<div style="display:flex;gap:4px"><select id="nd-cur" style="background:var(--cardH);border:1px solid var(--bd);border-radius:8px 0 0 8px;padding:10px 6px;color:var(--tx);font-family:var(--f);font-size:12px;width:64px"><option value="USD">$ USD</option><option value="ILS">\u20AA ILS</option></select><input id="nd-va" type="number" placeholder="100000" style="flex:1;border-radius:0 8px 8px 0"></div></div>';
+  h+='<div class="fg"><label>Signing Date</label>';
+  h+='<input id="nd-sd" type="date" value="2026-01-01"></div>';
+  h+='<div class="fg"><label>DSO (days)</label>';
+  h+='<input id="nd-ds" type="number" value="60"></div>';
+  h+='<div class="fg"><label>Probability %</label>';
+  h+='<input id="nd-ch" type="number" placeholder="75" min="0" max="100"></div>';
+  h+='<div class="fg"><label>Salesperson</label>';
+  h+='<select id="nd-sp">'+spOpts+'</select></div>';
+  h+='</div>';
+  h+='<div class="section-label" style="margin-top:12px">Contact Details (optional)</div>';
+  h+='<div class="fg-grid">';
+  h+='<div class="fg"><label>Contact Name</label><input id="nd-cn" placeholder="John Doe"></div>';
+  h+='<div class="fg"><label>Phone</label><input id="nd-cp" placeholder="+972..."></div>';
+  h+='<div class="fg"><label>Email</label><input id="nd-ce" type="email" placeholder="john@company.com"></div>';
+  h+='<div class="fg"><label>LinkedIn</label><input id="nd-li" placeholder="linkedin.com/in/..."></div>';
+  h+='</div>';
+  h+='<div style="display:flex;gap:8px;margin-top:12px">';
+  h+='<button class="btn-p" id="btnSaveDeal">Save Deal</button>';
+  h+='<button class="btn-ghost" id="btnCancelDeal">Cancel</button>';
+  h+='</div></div>';
+
+  // KPIs
+  h+='<div class="kg kg3">';
+  h+=kpi('\u25CE','Pipeline',fmt(cons.reduce(function(s,c){return s+c.value},0)),cons.length+' deals','var(--ac)');
+  h+=kpi('\u26A1','Weighted',fmt(cons.reduce(function(s,c){return s+c.weighted},0)),'Expected','var(--gn)',50);
+  h+=kpi('\u2714','Signed',cons.filter(function(c){return c.stage==='Signed'}).length+'','deals','var(--am)',100);
+  h+='</div>';
+
+  // Table
+  h+='<div class="tw"><div class="tw-h">Deals<span class="ct">'+cons.length+'</span></div>';
+  h+='<div style="overflow-x:auto"><table><thead><tr>';
+  h+='<th>Client</th><th>Country</th><th>Industry</th>';
+  h+='<th>Value</th><th>Stage</th><th>Salesperson</th><th>Updated</th>';
+  h+='</tr></thead><tbody id="pipTbl"></tbody></table></div></div>';
   el.innerHTML=h;
+
+  // Toggle form
+  document.getElementById('btnNewDeal').addEventListener('click',function(){
+    var f=document.getElementById('newDealForm');
+    f.style.display=f.style.display==='none'?'block':'none';
+  });
+  document.getElementById('btnCancelDeal').addEventListener('click',function(){
+    document.getElementById('newDealForm').style.display='none';
+  });
+
+  // Save new deal
+  document.getElementById('btnSaveDeal').addEventListener('click',function(){
+    var cl=document.getElementById('nd-cl').value;
+    var va=parseFloat(document.getElementById('nd-va').value);
+    if(!cl||!va){toast('Fill client and value');return}
+    var ch=document.getElementById('nd-ch').value;
+    var body={
+      client:cl,
+      country:document.getElementById('nd-co').value,
+      industry:document.getElementById('nd-in').value,
+      value:va,
+      signingDate:document.getElementById('nd-sd').value,
+      dso:parseInt(document.getElementById('nd-ds').value)||60,
+      chance:ch?parseFloat(ch)/100:null,
+      salespersonId:document.getElementById('nd-sp').value||null,
+      currency:document.getElementById('nd-cur').value,
+      contactName:document.getElementById('nd-cn').value||'',
+      contactPhone:document.getElementById('nd-cp').value||'',
+      contactEmail:document.getElementById('nd-ce').value||'',
+      contactLinkedin:document.getElementById('nd-li').value||''
+    };
+    authFetch('/api/contracts',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    }).then(function(r){return r.json()}).then(function(res){
+      if(res.ok){
+        toast('Deal created! Payment: '+res.paymentMonth);
+        document.getElementById('newDealForm').style.display='none';
+        document.getElementById('nd-cl').value='';
+        document.getElementById('nd-va').value='';
+        document.getElementById('nd-ch').value='';
+        loadAll().then(renderAll);
+      }
+    });
+  });
+
+  // Fill table rows
   var rows='';
   var stColors={'Initial Contact':'var(--txM)','Email Sent':'var(--cy)','Demo':'var(--ac)','Negotiation':'var(--am)','Signed':'var(--gn)'};
   cons.forEach(function(c){
-    var mine=USER.role==='admin'||(c.salespersonId===USER.id);
-    var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};var col=ic[c.industry]||'var(--txM)';
+    var mine=USER.role==='admin'||USER.role==='sales_manager'||(c.salespersonId===USER.id);
+    var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};
+    var col=ic[c.industry]||'var(--txM)';
     var stCol=stColors[c.stage]||'var(--txM)';
     rows+='<tr class="clickrow" data-cid="'+c.id+'" style="'+(mine?'':'opacity:.6')+'">';
     rows+='<td style="font-weight:600">'+c.client+'</td>';
@@ -318,19 +571,139 @@ function renderSalesPipeline(el){
     rows+='<td class="updated-tag">'+fmtDate(c.updatedAt)+'</td></tr>';
   });
   document.getElementById('pipTbl').innerHTML=rows;
-  document.querySelectorAll('#pipTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var c=D.contracts.find(function(x){return x.id===r.dataset.cid});if(c)openContractCard(c)})});
+  makeSearchable('pipTbl');
+  document.querySelectorAll('#pipTbl .clickrow').forEach(function(r){
+    r.addEventListener('click',function(){
+      var c=D.contracts.find(function(x){return x.id===r.dataset.cid});
+      if(c)openContractCard(c);
+    });
+  });
 }
 
 // Sales Dashboard (for sales role)
 function renderSalesDash(el){
   var s=SA;
-  var h='<div class="kg kg3">'+kpi('\u25CE','Total',fmt(s.total),s.dealCount+' deals','var(--ac)')+kpi('\u2605','Top Sector',s.topType||'','','var(--gn)',50)+kpi('\u2609','Top Country',s.topCountry||'','','var(--cy)',100)+'</div>';
-  h+='<div class="cg cg2"><div class="cc"><div class="cc-t">By Type</div><div style="height:260px"><canvas id="chSD1"></canvas></div></div><div class="cc"><div class="cc-t">By Country</div><div style="height:260px"><canvas id="chSD2"></canvas></div></div></div>';
+  var cons=D.contracts;
+  var signed=cons.filter(function(c){return c.stage==='Signed'});
+  var pipeline=cons.filter(function(c){return c.stage!=='Signed'});
+  var signedVal=signed.reduce(function(s,c){return s+c.value},0);
+  var pipVal=pipeline.reduce(function(s,c){return s+c.value},0);
+  var pipW=pipeline.reduce(function(s,c){return s+c.weighted},0);
+
+  var h='<div class="kg kg4">';
+  h+=kpi('\u2714','Signed',fmt(signedVal),signed.length+' deals','var(--gn)');
+  h+=kpi('\u25CE','Pipeline',fmt(pipVal),pipeline.length+' deals','var(--ac)',50);
+  h+=kpi('\u26A1','Pipeline (Wtd)',fmt(pipW),'Weighted','var(--am)',100);
+  var topCS=s.topCountry||'\u2014';
+  var topCSVal=s.byCountry[topCS]?fmt(s.byCountry[topCS].signed):'';
+  h+=kpi('\u2609','Top Country (Signed)',topCS,topCSVal+' signed','var(--cy)',150);
+  h+='</div>';
+
+  h+='<div class="cg" style="grid-template-columns:1fr 1fr 1fr;gap:14px">';
+  h+='<div class="cc"><div class="cc-t">Signed vs Pipeline</div><div style="height:240px"><canvas id="chSD0"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">By Type (Signed / Pipeline)</div><div style="height:240px"><canvas id="chSD1"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t" style="justify-content:space-between">By Country <button class="btn-ghost" id="btnExpandCountry2" style="padding:4px 12px;font-size:11px">Expand</button></div><div style="height:240px"><canvas id="chSD2"></canvas></div></div>';
+  h+='</div>';
+
+  // Signed grouped by salesperson
+  var signedBySp2={};
+  signed.forEach(function(c){
+    var sp=c.salespersonName||'Unassigned';
+    if(!signedBySp2[sp]) signedBySp2[sp]={total:0,count:0,deals:[]};
+    signedBySp2[sp].total+=c.value; signedBySp2[sp].count++; signedBySp2[sp].deals.push(c);
+  });
+  var signedSps2=Object.keys(signedBySp2).sort(function(a,b){return signedBySp2[b].total-signedBySp2[a].total});
+
+  h+='<div class="tw"><div class="tw-h" style="color:var(--gn)">\u2714 Signed <span class="ct">'+signed.length+'</span></div>';
+  h+='<div style="overflow-x:auto;max-height:350px"><table><thead><tr>';
+  h+='<th>Salesperson</th><th>Deals</th><th>Total Value</th>';
+  h+='</tr></thead><tbody id="sdSignTbl">';
+  signedSps2.forEach(function(sp){
+    var d=signedBySp2[sp];
+    h+='<tr class="clickrow sp-row2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="cursor:pointer">';
+    h+='<td style="font-weight:700">'+sp+'</td>';
+    h+='<td class="mono">'+d.count+'</td>';
+    h+='<td class="mono" style="font-weight:700;color:var(--gn)">'+fmt(d.total)+'</td></tr>';
+    var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};
+    d.deals.forEach(function(c){
+      var col=ic[c.industry]||'var(--txM)';
+      h+='<tr class="sp-detail2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="display:none">';
+      h+='<td style="padding-left:32px;color:var(--txD)">'+c.client+'<span style="margin-left:8px;color:var(--txM);font-size:10px">'+c.country+'</span></td>';
+      h+='<td><span class="pill" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span></td>';
+      h+='<td class="mono" style="font-weight:600">'+fmt(c.value)+'</td></tr>';
+    });
+  });
+  h+='</tbody></table></div></div>';
+
+  // Pipeline grouped by salesperson
+  var pipBySp2={};
+  pipeline.forEach(function(c){
+    var sp=c.salespersonName||'Unassigned';
+    if(!pipBySp2[sp]) pipBySp2[sp]={total:0,weighted:0,count:0,deals:[]};
+    pipBySp2[sp].total+=c.value; pipBySp2[sp].weighted+=c.weighted;
+    pipBySp2[sp].count++; pipBySp2[sp].deals.push(c);
+  });
+  var pipSps2=Object.keys(pipBySp2).sort(function(a,b){return pipBySp2[b].weighted-pipBySp2[a].weighted});
+
+  h+='<div class="tw"><div class="tw-h" style="color:var(--ac)">\u25CE Pipeline <span class="ct">'+pipeline.length+'</span></div>';
+  h+='<div style="overflow-x:auto;max-height:350px"><table><thead><tr>';
+  h+='<th>Salesperson</th><th>Deals</th><th>Total Value</th><th>Weighted</th>';
+  h+='</tr></thead><tbody id="sdPipeTbl">';
+  pipSps2.forEach(function(sp){
+    var d=pipBySp2[sp];
+    h+='<tr class="clickrow sp-row2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="cursor:pointer">';
+    h+='<td style="font-weight:700">'+sp+'</td>';
+    h+='<td class="mono">'+d.count+'</td>';
+    h+='<td class="mono" style="font-weight:700">'+fmt(d.total)+'</td>';
+    h+='<td class="mono" style="font-weight:700;color:var(--acL)">'+fmt(d.weighted)+'</td></tr>';
+    var stColors2={'Initial Contact':'var(--txM)','Email Sent':'var(--cy)','Demo':'var(--ac)','Negotiation':'var(--am)'};
+    d.deals.forEach(function(c){
+      var stCol=stColors2[c.stage]||'var(--txM)';
+      h+='<tr class="sp-detail2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="display:none">';
+      h+='<td style="padding-left:32px;color:var(--txD)">'+c.client+'<span style="margin-left:8px;color:var(--txM);font-size:10px">'+c.country+'</span></td>';
+      h+='<td><span class="pill" style="background:'+stCol+'18;color:'+stCol+'">'+c.stage+'</span></td>';
+      h+='<td class="mono" style="font-weight:600">'+fmt(c.value)+'</td>';
+      h+='<td class="mono" style="color:var(--acL)">'+fmt(c.weighted)+'</td></tr>';
+    });
+  });
+  h+='</tbody></table></div></div>';
+
   el.innerHTML=h;
-  var tN=Object.keys(s.byType),tV=tN.map(function(t){return s.byType[t].total});
-  mk('chSD1',{type:'doughnut',data:{labels:tN,datasets:[{data:tV,backgroundColor:['#3b82f6','#ec4899','#10b981'],borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
-  var cN=Object.keys(s.byCountry),cV=cN.map(function(c){return s.byCountry[c].total});
-  mk('chSD2',{type:'bar',data:{labels:cN,datasets:[{data:cV,backgroundColor:'#3b82f6',borderRadius:5}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+
+  // Charts
+  mk('chSD0',{type:'doughnut',data:{labels:['Signed','Pipeline (Wtd)'],datasets:[{data:[signedVal,pipW],backgroundColor:['#10b981','#3b82f6'],borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
+
+  var tN2=Object.keys(s.byType);
+  var tS2=tN2.map(function(t){return s.byType[t].signed||0});
+  var tP2=tN2.map(function(t){return s.byType[t].pipeline||0});
+  mk('chSD1',{type:'bar',data:{labels:tN2,datasets:[
+    {label:'Signed',data:tS2,backgroundColor:'#10b981',borderRadius:3,stack:'s'},
+    {label:'Pipeline',data:tP2,backgroundColor:'#3b82f680',borderRadius:{topLeft:3,topRight:3},stack:'s'}
+  ]},options:{plugins:{legend:{display:true,position:'bottom'}}}});
+
+  var cN2=Object.keys(s.byCountry);
+  var cS2=cN2.map(function(c){return s.byCountry[c].signed||0});
+  var cP2=cN2.map(function(c){return s.byCountry[c].pipeline||0});
+  mk('chSD2',{type:'bar',data:{labels:cN2,datasets:[
+    {label:'Signed',data:cS2,backgroundColor:'#10b981',borderRadius:3,stack:'s'},
+    {label:'Pipeline',data:cP2,backgroundColor:'#3b82f680',borderRadius:{topLeft:3,topRight:3},stack:'s'}
+  ]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}},plugins:{legend:{display:true,position:'bottom'}}}});
+
+  document.getElementById('btnExpandCountry2').addEventListener('click',function(){
+    openCountryBreakdown(D.contracts);
+  });
+  makeSearchable('sdSignTbl');
+  makeSearchable('sdPipeTbl');
+
+  // Toggle expand
+  document.querySelectorAll('.sp-row2').forEach(function(row){
+    row.addEventListener('click',function(){
+      var sp=this.dataset.sp;
+      var details=document.querySelectorAll('.sp-detail2[data-sp="'+sp+'"]');
+      var showing=details[0]&&details[0].style.display!=='none';
+      details.forEach(function(d){d.style.display=showing?'none':'table-row'});
+    });
+  });
 }
 
 // ══════════════════════════════════════════
@@ -354,10 +727,32 @@ function renderSettings(el){
   // Fill contract settings table
   var cr='';D.contracts.forEach(function(c){var stC={'Signed':'var(--gn)','Negotiation':'var(--am)','Demo':'var(--ac)'}[c.stage]||'var(--txM)';cr+='<tr class="clickrow" data-cid="'+c.id+'"><td style="font-weight:600">'+c.client+'</td><td><span class="pill" style="background:'+stC+'18;color:'+stC+'">'+c.stage+'</span></td><td class="mono" style="font-weight:700">'+fmt(c.value)+'</td><td style="color:var(--txD);font-size:11px">'+(c.salespersonName||'\u2014')+'</td><td class="updated-tag">'+fmtDate(c.updatedAt)+'</td></tr>'});
   document.getElementById('setCRows').innerHTML=cr;
+  makeSearchable('setCRows');
   document.querySelectorAll('#setCRows .clickrow').forEach(function(r){r.addEventListener('click',function(){var c=D.contracts.find(function(x){return x.id===r.dataset.cid});if(c)openContractCard(c)})});
   // Employee + Expense (simplified)
-  document.getElementById('st-semp').innerHTML='<div class="tw"><div class="tw-h">Employees</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Dept</th><th>Gross</th><th>Labor</th></tr></thead><tbody>'+D.employees.map(function(e){return'<tr><td style="font-weight:600">'+e.name+'</td><td><span class="pill" style="background:var(--ac)18;color:var(--ac)">'+e.dept+'</span></td><td class="mono">'+fmt(e.gross)+'</td><td class="mono" style="color:var(--gn)">'+fmt(e.laborCost)+'</td></tr>'}).join('')+'</tbody></table></div></div>';
-  document.getElementById('st-sexp').innerHTML='<div class="tw"><div class="tw-h">Expenses</div><div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Dept</th><th>Monthly</th><th>Type</th></tr></thead><tbody>'+D.expenses.map(function(x){return'<tr class="clickrow" data-xid="'+x.id+'"><td style="font-weight:600">'+x.vendor+'</td><td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td><td class="mono">'+fmt(x.amount)+'/mo</td><td>'+(x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx')+'</td></tr>'}).join('')+'</tbody></table></div></div>';
+  // Employee table - clickable
+  var empHtml='<div class="tw"><div class="tw-h">Employees</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Dept</th><th>Position %</th><th>Gross (USD)</th><th>Cur</th><th>Labor (USD)</th></tr></thead><tbody id="setEmpTbl">';
+  empHtml+=D.employees.map(function(e){
+    var cur=e.currency||'ILS';
+    var rate=D.exchangeRate||3.12;
+    var grossUsd=cur==='ILS'?e.gross/rate:e.gross;
+    return '<tr class="clickrow" data-eid="'+e.id+'"><td style="font-weight:600">'+e.name+'</td><td><span class="pill" style="background:var(--ac)18;color:var(--ac)">'+e.dept+'</span></td><td class="mono">'+(e.positionPct||100)+'%</td><td class="mono">'+fmt(grossUsd)+'</td><td style="font-size:10px;font-weight:700;color:'+(cur==='ILS'?'var(--am)':'var(--gn)')+'">'+cur+'</td><td class="mono" style="color:var(--gn)">'+fmt(e.laborCost)+'</td></tr>';
+  }).join('');
+  empHtml+='</tbody></table></div></div>';
+  document.getElementById('st-semp').innerHTML=empHtml;
+  makeSearchable('setEmpTbl');
+  document.querySelectorAll('#setEmpTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var e=D.employees.find(function(x){return x.id===r.dataset.eid});if(e)openEmployeeCard(e)})});
+
+  // Expense table - clickable
+  var expHtml='<div class="tw"><div class="tw-h">Expenses</div><div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Service</th><th>Dept</th><th>Amount</th><th>Freq</th><th>Type</th></tr></thead><tbody id="setExpTbl">';
+  var freqLabels={monthly:'Monthly',bimonthly:'Bi-Monthly',quarterly:'Quarterly',semi_annual:'Semi-Annual',annual:'Annual'};
+  expHtml+=D.expenses.map(function(x){
+    return '<tr class="clickrow" data-xid="'+x.id+'"><td style="font-weight:600">'+x.vendor+'</td><td style="color:var(--txD);font-size:11px">'+(x.serviceDesc||x.subCat||'\u2014')+'</td><td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td><td class="mono">'+fmt(x.amount)+'/mo</td><td style="font-size:11px;color:var(--txD)">'+(freqLabels[x.frequency]||'Monthly')+'</td><td>'+(x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx')+'</td></tr>';
+  }).join('');
+  expHtml+='</tbody></table></div></div>';
+  document.getElementById('st-sexp').innerHTML=expHtml;
+  makeSearchable('setExpTbl');
+  document.querySelectorAll('#setExpTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var x=D.expenses.find(function(e){return e.id===r.dataset.xid});if(x)openExpenseCard(x)})});
 }
 
 // ══════════════════════════════════════════
@@ -365,8 +760,88 @@ function renderSettings(el){
 // ══════════════════════════════════════════
 function closeModal(){var el=document.getElementById('modalOverlay');if(el)el.remove()}
 
+function openCountryBreakdown(contracts){
+  // Group by country
+  var byC={};
+  contracts.forEach(function(c){
+    var co=c.country||'Unknown';
+    if(!byC[co]) byC[co]={total:0,weighted:0,signed:0,signedVal:0,pipeline:0,deals:[]};
+    byC[co].total+=c.value;
+    byC[co].weighted+=c.weighted;
+    if(c.stage==='Signed'){byC[co].signed++;byC[co].signedVal+=c.value}
+    else{byC[co].pipeline++}
+    byC[co].deals.push(c);
+  });
+  var sorted=Object.keys(byC).sort(function(a,b){return byC[b].total-byC[a].total});
+
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:750px">';
+  h+='<div class="modal-head"><h2>Revenue by Country</h2>';
+  h+='<button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body">';
+
+  // Summary chart
+  h+='<div style="height:'+Math.max(200,sorted.length*32)+'px;margin-bottom:20px"><canvas id="chCountryFull"></canvas></div>';
+
+  // Detail table
+  h+='<table style="width:100%"><thead><tr>';
+  h+='<th>Country</th><th>Total Value</th><th>Weighted</th>';
+  h+='<th>Signed</th><th>Pipeline</th><th>Deals</th>';
+  h+='</tr></thead><tbody>';
+  sorted.forEach(function(co){
+    var d=byC[co];
+    h+='<tr style="cursor:pointer" class="country-row" data-country="'+co+'">';
+    h+='<td style="font-weight:700">'+co+'</td>';
+    h+='<td class="mono" style="font-weight:700">'+fmt(d.total)+'</td>';
+    h+='<td class="mono" style="color:var(--acL)">'+fmt(d.weighted)+'</td>';
+    h+='<td><span class="pill" style="background:var(--gnG);color:var(--gn)">'+d.signed+' ('+fmt(d.signedVal)+')</span></td>';
+    h+='<td class="mono">'+d.pipeline+'</td>';
+    h+='<td class="mono">'+(d.signed+d.pipeline)+'</td>';
+    h+='</tr>';
+    // Expandable deals list
+    h+='<tr class="deal-detail" data-country="'+co+'" style="display:none"><td colspan="6" style="padding:0">';
+    h+='<div style="padding:8px 20px 12px;background:var(--bg)">';
+    d.deals.forEach(function(deal){
+      var stC={'Signed':'var(--gn)','Negotiation':'var(--am)','Demo':'var(--ac)','Email Sent':'var(--cy)'}[deal.stage]||'var(--txM)';
+      h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bd);font-size:12px">';
+      h+='<span style="font-weight:600">'+deal.client+'</span>';
+      h+='<span><span class="pill" style="background:'+stC+'18;color:'+stC+';margin-right:8px">'+deal.stage+'</span>';
+      h+='<span class="mono" style="font-weight:700">'+fmt(deal.value)+'</span></span>';
+      h+='</div>';
+    });
+    h+='</div></td></tr>';
+  });
+  h+='</tbody></table>';
+  h+='</div>';
+  h+='<div class="modal-foot"><button class="btn-ghost" id="mcX">Close</button></div>';
+  h+='</div></div>';
+
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('mcX').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
+
+  // Toggle deal rows on country click
+  document.querySelectorAll('.country-row').forEach(function(row){
+    row.addEventListener('click',function(){
+      var co=this.dataset.country;
+      var detail=document.querySelector('.deal-detail[data-country="'+co+'"]');
+      if(detail) detail.style.display=detail.style.display==='none'?'table-row':'none';
+    });
+  });
+
+  // Full chart
+  var cLabels=sorted;
+  var cVals=sorted.map(function(co){return byC[co].total});
+  var cSigned=sorted.map(function(co){return byC[co].signedVal});
+  var cPip=sorted.map(function(co){return byC[co].total-byC[co].signedVal});
+  mk('chCountryFull',{type:'bar',data:{labels:cLabels,datasets:[
+    {label:'Signed',data:cSigned,backgroundColor:'#10b981',borderRadius:3,stack:'s'},
+    {label:'Pipeline',data:cPip,backgroundColor:'#3b82f6',borderRadius:{topLeft:3,topRight:3},stack:'s'}
+  ]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}}}});
+}
+
 function openContractCard(c){
-  var canEdit=USER.role==='admin'||(c.salespersonId===USER.id);
+  var canEdit=USER.role==='admin'||USER.role==='sales_manager'||(c.salespersonId===USER.id);
   var chV=c.chance!=null?(c.chance*100).toFixed(0):'';
   var wv=c.chance!=null?c.value*c.chance:0;
   var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};var col=ic[c.industry]||'var(--txM)';
@@ -374,10 +849,22 @@ function openContractCard(c){
   var curIdx=STAGES.indexOf(c.stage);
 
   var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
-  h+='<div class="modal-head"><h2>'+c.client+' <span class="mtag" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span> <span class="mtag" style="background:'+(stColors[c.stage]||'var(--txM)')+'18;color:'+(stColors[c.stage]||'var(--txM)')+'">'+c.stage+'</span></h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-head"><h2>'+c.client;
+  h+=' <span class="mtag" style="background:'+col+'18;color:'+col+'">';
+  h+=c.industry+'</span>';
+  h+=' <span class="mtag" style="background:'+(stColors[c.stage]||'var(--txM)')+'18;color:'+(stColors[c.stage]||'var(--txM)')+'">';
+  h+=c.stage+'</span>';
+  h+='</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
   h+='<div class="modal-body">';
+
   // KPIs
-  h+='<div class="kpi-row"><div class="kpi-mini"><div class="kv">'+fmt(c.value)+'</div><div class="kl">Value</div></div><div class="kpi-mini"><div class="kv" style="color:var(--acL)">'+(chV?chV+'%':'\u2014')+'</div><div class="kl">Probability</div></div><div class="kpi-mini"><div class="kv" style="color:var(--gn)">'+fmt(wv)+'</div><div class="kl">Expected</div></div><div class="kpi-mini"><div class="kv" style="color:var(--txD)">'+c.dso+'d</div><div class="kl">DSO</div></div></div>';
+  h+='<div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+fmt(c.value)+'</div><div class="kl">Value</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--acL)">'+(chV?chV+'%':'\u2014')+'</div><div class="kl">Probability</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--gn)">'+fmt(wv)+'</div><div class="kl">Expected</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--txD)">'+c.dso+'d</div><div class="kl">DSO</div></div>';
+  h+='</div>';
+
   // Stage pipeline
   h+='<div class="section-label">Sales Stage</div>';
   h+='<div class="stage-pills" id="stagePills">';
@@ -390,11 +877,40 @@ function openContractCard(c){
     h+='<div class="'+cls+'" data-stage="'+st+'">'+st+'</div>';
   });
   h+='</div>';
-  if(c.stageUpdatedAt)h+='<div class="updated-tag" style="margin-top:6px">Stage updated: '+fmtDate(c.stageUpdatedAt)+'</div>';
+  if(c.stageUpdatedAt) h+='<div class="updated-tag" style="margin-top:6px">Stage updated: '+fmtDate(c.stageUpdatedAt)+'</div>';
+
+  // Contact Info
+  h+='<div class="modal-sep"></div>';
+  h+='<div class="section-label">Contact Information</div>';
+  if(canEdit){
+    h+='<div class="modal-grid">';
+    h+='<div class="mf"><label>Contact Name</label><input id="mc-cn" value="'+(c.contactName||'')+'"></div>';
+    h+='<div class="mf"><label>Phone</label><input id="mc-cp" value="'+(c.contactPhone||'')+'"></div>';
+    h+='<div class="mf"><label>Email</label><input id="mc-ce" type="email" value="'+(c.contactEmail||'')+'"></div>';
+    h+='<div class="mf"><label>LinkedIn</label><input id="mc-cl2" value="'+(c.contactLinkedin||'')+'"></div>';
+    h+='</div>';
+  } else {
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">';
+    h+='<div><span style="color:var(--txM)">Name:</span> '+(c.contactName||'\u2014')+'</div>';
+    h+='<div><span style="color:var(--txM)">Phone:</span> '+(c.contactPhone||'\u2014')+'</div>';
+    h+='<div><span style="color:var(--txM)">Email:</span> '+(c.contactEmail||'\u2014')+'</div>';
+    if(c.contactLinkedin) h+='<div><a href="'+(c.contactLinkedin.startsWith('http')?c.contactLinkedin:'https://'+c.contactLinkedin)+'" target="_blank" style="color:var(--ac)">LinkedIn Profile</a></div>';
+    h+='</div>';
+  }
+
   // Salesperson
   h+='<div class="modal-sep"></div>';
   h+='<div class="section-label">Salesperson</div>';
-  h+='<div style="font-size:14px;font-weight:600;margin-bottom:4px">'+(c.salespersonName||'Unassigned')+'</div>';
+  if(canEdit){
+    var spOpts='<option value="">-- Unassigned --</option>';
+    (D.salespeople||[]).forEach(function(sp){
+      spOpts+='<option value="'+sp.id+'"'+(c.salespersonId===sp.id?' selected':'')+'>'+sp.name+'</option>';
+    });
+    h+='<select id="mc-sp" class="mf" style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;color:var(--tx);font-family:var(--f);font-size:14px;width:100%;max-width:300px">'+spOpts+'</select>';
+  } else {
+    h+='<div style="font-size:14px;font-weight:600">'+(c.salespersonName||'Unassigned')+'</div>';
+  }
+
   // Notes
   h+='<div class="modal-sep"></div>';
   h+='<div class="section-label">Notes & Call Log</div>';
@@ -402,32 +918,67 @@ function openContractCard(c){
   (c.notes||[]).slice().reverse().forEach(function(n){
     h+='<div class="note-item"><div class="note-meta">'+n.by+' \u2022 '+fmtDate(n.at)+'</div><div class="note-text">'+n.text+'</div></div>';
   });
-  if(!(c.notes||[]).length)h+='<div style="color:var(--txM);font-size:12px;padding:8px">No notes yet</div>';
+  if(!(c.notes||[]).length) h+='<div style="color:var(--txM);font-size:12px;padding:8px">No notes yet</div>';
   h+='</div>';
   if(canEdit){
-    h+='<div class="note-input"><textarea id="noteText" placeholder="Add a note..."></textarea><button class="btn-p" id="btnNote" style="padding:10px 16px">Add</button></div>';
+    h+='<div class="note-input"><textarea id="noteText" placeholder="Add a note..."></textarea>';
+    h+='<button class="btn-p" id="btnNote" style="padding:10px 16px">Add</button></div>';
   }
-  // Edit fields (admin only for non-stage fields)
-  if(USER.role==='admin'){
+
+  // Deal details (editable for canEdit users)
+  if(canEdit){
     h+='<div class="modal-sep"></div>';
-    h+='<div class="section-label">Edit Details</div>';
+    h+='<div class="section-label">Deal Details</div>';
     h+='<div class="modal-grid">';
     h+='<div class="mf"><label>Client</label><input id="mc-cl" value="'+(c.client||'')+'"></div>';
     h+='<div class="mf"><label>Country</label><input id="mc-co" value="'+(c.country||'')+'"></div>';
-    h+='<div class="mf"><label>Value</label><input id="mc-va" type="number" value="'+c.value+'"></div>';
-    h+='<div class="mf"><label>DSO</label><input id="mc-ds" type="number" value="'+c.dso+'"></div>';
-    h+='<div class="mf"><label>Chance %</label><input id="mc-ch" type="number" value="'+chV+'"></div>';
-    var spOpts='<option value="">--</option>';(D.salespeople||[]).forEach(function(sp){spOpts+='<option value="'+sp.id+'"'+(c.salespersonId===sp.id?' selected':'')+'>'+sp.name+'</option>'});
-    h+='<div class="mf"><label>Salesperson</label><select id="mc-sp">'+spOpts+'</select></div>';
+    h+='<div class="mf"><label>Industry</label><select id="mc-in">';
+    h+='<option'+(c.industry==='Government'?' selected':'')+'>Government</option>';
+    h+='<option'+(c.industry==='Enterprise'?' selected':'')+'>Enterprise</option>';
+    h+='<option'+(c.industry==='Academy'?' selected':'')+'>Academy</option>';
+    h+='</select></div>';
+    h+='<div class="mf"><label>Value (USD)</label><input id="mc-va" type="number" value="'+c.value+'"></div>';
+    h+='<div class="mf"><label>DSO (days)</label><input id="mc-ds" type="number" value="'+c.dso+'"></div>';
+    h+='<div class="mf"><label>Probability %</label><input id="mc-ch" type="number" value="'+chV+'" min="0" max="100"></div>';
     h+='</div>';
   }
+
+  // Payment Schedule — simple rows
+  h+='<div class="modal-sep"></div>';
+  h+='<div class="section-label">Payments</div>';
+  var splits=c.paymentSplits||[];
+  h+='<div id="splitRows">';
+  if(splits.length>0){
+    splits.forEach(function(sp,i){
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd)">';
+      h+='<span class="mono" style="font-weight:700;font-size:14px;min-width:90px">'+fmt(sp.amount)+'</span>';
+      h+='<span style="color:var(--txD);font-size:13px">'+sp.date+'</span>';
+      h+='<span style="color:var(--txM);font-size:11px;margin-left:auto">'+(Math.round(sp.amount/c.value*100))+'%</span>';
+      if(canEdit) h+='<button class="btn-d split-del" data-idx="'+i+'" style="padding:2px 8px;font-size:10px">\u2715</button>';
+      h+='</div>';
+    });
+    var splitsTotal=splits.reduce(function(s,sp){return s+(sp.amount||0)},0);
+    var match=Math.abs(splitsTotal-c.value)<1;
+    h+='<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12px;font-weight:700">';
+    h+='<span>Total</span>';
+    h+='<span class="mono" style="color:'+(match?'var(--gn)':'var(--am)')+'">'+fmt(splitsTotal)+' / '+fmt(c.value)+'</span></div>';
+  } else {
+    h+='<div style="color:var(--txM);font-size:12px;padding:4px 0">Single payment by DSO ('+c.dso+' days)</div>';
+  }
   h+='</div>';
+  if(canEdit){
+    h+='<div id="newSplitRows"></div>';
+    h+='<button class="btn-ghost" id="btnAddRow" style="margin-top:8px;padding:6px 14px;font-size:12px">+ Add Payment</button>';
+  }
+
+  h+='</div>';
+
   // Footer
   h+='<div class="modal-foot">';
-  if(c.updatedAt)h+='<div style="flex:1;font-size:10px;color:var(--txM)">Last updated: '+fmtDate(c.updatedAt)+'</div>';
-  if(USER.role==='admin')h+='<button class="btn-d" id="mcDel">Delete</button>';
+  if(c.updatedAt) h+='<div style="flex:1;font-size:10px;color:var(--txM)">Updated: '+fmtDate(c.updatedAt)+'</div>';
+  if(USER.role==='admin') h+='<button class="btn-d" id="mcDel">Delete</button>';
   h+='<button class="btn-ghost" id="mcX">Close</button>';
-  if(USER.role==='admin')h+='<button class="btn-p" id="mcSave">Save</button>';
+  if(canEdit) h+='<button class="btn-p" id="mcSave">Save</button>';
   h+='</div></div></div>';
 
   document.body.insertAdjacentHTML('beforeend',h);
@@ -440,7 +991,7 @@ function openContractCard(c){
     pill.addEventListener('click',function(){
       var newStage=this.dataset.stage;
       if(!confirm('Advance to "'+newStage+'"? This cannot be undone.'))return;
-      authFetch('/api/contracts/'+c.id+'/stage',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage:newStage})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Stage: '+newStage);loadAll().then(renderAll)}else{toast(res.detail||'Error')}});
+      authFetch('/api/contracts/'+c.id+'/stage',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage:newStage})}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Stage: '+newStage);loadAll().then(function(){closeModal();var updated=D.contracts.find(function(x){return x.id===c.id});if(updated)openContractCard(updated)})}else{toast(res.detail||'Error')}});
     });
   });
 
@@ -448,30 +999,307 @@ function openContractCard(c){
   if(canEdit&&document.getElementById('btnNote')){
     document.getElementById('btnNote').addEventListener('click',function(){
       var txt=document.getElementById('noteText').value.trim();if(!txt)return;
-      authFetch('/api/contracts/'+c.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Note added');loadAll().then(renderAll)}});
+      authFetch('/api/contracts/'+c.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Note added');loadAll().then(function(){closeModal();var updated=D.contracts.find(function(x){return x.id===c.id});if(updated)openContractCard(updated)})}});
     });
   }
 
-  // Admin save
-  if(USER.role==='admin'&&document.getElementById('mcSave')){
+  // Save (all canEdit users)
+  if(canEdit&&document.getElementById('mcSave')){
     document.getElementById('mcSave').addEventListener('click',function(){
-      var ch=document.getElementById('mc-ch').value;
-      authFetch('/api/contracts/'+c.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client:document.getElementById('mc-cl').value,country:document.getElementById('mc-co').value,value:parseFloat(document.getElementById('mc-va').value),dso:parseInt(document.getElementById('mc-ds').value),chance:ch!==''?parseFloat(ch)/100:null,salespersonId:document.getElementById('mc-sp').value||null})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated!');loadAll().then(renderAll)}});
+      var ch=document.getElementById('mc-ch')?document.getElementById('mc-ch').value:'';
+      var body={};
+      if(document.getElementById('mc-cl')&&document.getElementById('mc-cl').value) body.client=document.getElementById('mc-cl').value;
+      if(document.getElementById('mc-co')) body.country=document.getElementById('mc-co').value;
+      if(document.getElementById('mc-in')) body.industry=document.getElementById('mc-in').value;
+      var val=document.getElementById('mc-va')?parseFloat(document.getElementById('mc-va').value):NaN;
+      if(!isNaN(val)) body.value=val;
+      var dso=document.getElementById('mc-ds')?parseInt(document.getElementById('mc-ds').value):NaN;
+      if(!isNaN(dso)) body.dso=dso;
+      if(ch!==''&&!isNaN(parseFloat(ch))) body.chance=parseFloat(ch)/100;
+      if(document.getElementById('mc-sp')) body.salespersonId=document.getElementById('mc-sp').value||null;
+      if(document.getElementById('mc-cn')) body.contactName=document.getElementById('mc-cn').value;
+      if(document.getElementById('mc-cp')) body.contactPhone=document.getElementById('mc-cp').value;
+      if(document.getElementById('mc-ce')) body.contactEmail=document.getElementById('mc-ce').value;
+      if(document.getElementById('mc-cl2')) body.contactLinkedin=document.getElementById('mc-cl2').value;
+      console.log('Saving contract',c.id,body);
+      authFetch('/api/contracts/'+c.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){
+          console.log('Response status:',r.status);
+          if(!r.ok){return r.text().then(function(t){console.error('Error:',t);toast('Error: '+r.status);throw new Error(t)})}
+          return r.json();
+        })
+        .then(function(res){if(res&&res.ok){toast('Saved!');loadAll().then(function(){closeModal();var updated=D.contracts.find(function(x){return x.id===c.id});if(updated)openContractCard(updated)})}})
+        .catch(function(err){console.error('Save failed:',err)});
     });
-    document.getElementById('mcDel').addEventListener('click',function(){if(!confirm('Delete?'))return;authFetch('/api/contracts/'+c.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted');loadAll().then(renderAll)}})});
   }
+
+  // Delete (admin only)
+  if(USER.role==='admin'&&document.getElementById('mcDel')){
+    document.getElementById('mcDel').addEventListener('click',function(){
+      if(!confirm('Delete "'+c.client+'"?'))return;
+      authFetch('/api/contracts/'+c.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted');loadAll().then(renderAll)}});
+    });
+  }
+
+  // Add payment row button
+  var splitCounter=0;
+  if(canEdit&&document.getElementById('btnAddRow')){
+    document.getElementById('btnAddRow').addEventListener('click',function(){
+      splitCounter++;
+      var container=document.getElementById('newSplitRows');
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;gap:8px;align-items:flex-end;padding:8px 0;border-bottom:1px solid var(--bd)';
+      row.innerHTML='<div class="mf" style="flex:1"><label>Amount</label><input class="sp-new-amt" type="number" placeholder="'+Math.round(c.value/2)+'"></div>'
+        +'<div class="mf" style="flex:1"><label>Date</label><input class="sp-new-date" type="date" value="2026-06-15"></div>'
+        +'<button class="btn-p sp-new-save" style="padding:8px 14px;margin:0;font-size:11px">Save</button>'
+        +'<button class="btn-d sp-new-cancel" style="padding:6px 10px;font-size:10px">\u2715</button>';
+      container.appendChild(row);
+
+      row.querySelector('.sp-new-save').addEventListener('click',function(){
+        var amt=parseFloat(row.querySelector('.sp-new-amt').value);
+        var dt=row.querySelector('.sp-new-date').value;
+        if(!amt||!dt){toast('Fill amount and date');return}
+        var currentSplits=c.paymentSplits?c.paymentSplits.slice():[];
+        currentSplits.push({amount:amt,date:dt});
+        authFetch('/api/contracts/'+c.id+'/splits',{
+          method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({splits:currentSplits})
+        }).then(function(r){return r.json()}).then(function(res){
+          if(res.ok){toast('Payment added');loadAll().then(function(){closeModal();var updated=D.contracts.find(function(x){return x.id===c.id});if(updated)openContractCard(updated)})}
+        });
+      });
+
+      row.querySelector('.sp-new-cancel').addEventListener('click',function(){
+        row.remove();
+      });
+    });
+  }
+
+  // Delete split buttons
+  document.querySelectorAll('.split-del').forEach(function(btn){
+    btn.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var idx=parseInt(this.dataset.idx);
+      var currentSplits=c.paymentSplits?c.paymentSplits.slice():[];
+      currentSplits.splice(idx,1);
+      authFetch('/api/contracts/'+c.id+'/splits',{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({splits:currentSplits})
+      }).then(function(r){return r.json()}).then(function(res){
+        if(res.ok){toast('Split removed');loadAll().then(function(){closeModal();var updated=D.contracts.find(function(x){return x.id===c.id});if(updated)openContractCard(updated)})}
+      });
+    });
+  });
 }
 
 function openExpenseCard(x){
-  if(USER.role!=='admin')return;
-  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card"><div class="modal-head"><h2>'+x.vendor+' <span class="mtag" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span>'+(x.isCogs?' <span class="cogs-badge">COGS</span>':'')+'</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
-  h+='<div class="modal-body"><div class="kpi-row"><div class="kpi-mini"><div class="kv">'+fmt(x.amount)+'</div><div class="kl">Monthly</div></div><div class="kpi-mini"><div class="kv" style="color:var(--am)">'+fmt(x.amount*12)+'</div><div class="kl">Annual</div></div></div>';
-  h+='<div class="modal-grid"><div class="mf"><label>Vendor</label><input id="mx-vn" value="'+x.vendor+'"></div><div class="mf"><label>Dept</label><select id="mx-dp"><option'+(x.dept==='R&D'?' selected':'')+'>R&D</option><option'+(x.dept==='S&M'?' selected':'')+'>S&M</option><option'+(x.dept==='G&A'?' selected':'')+'>G&A</option><option'+(x.dept==='Training'?' selected':'')+'>Training</option></select></div><div class="mf"><label>Monthly</label><input id="mx-am" type="number" value="'+x.amount+'"></div><div class="mf"><label>COGS?</label><select id="mx-cg"><option value="false"'+(!x.isCogs?' selected':'')+'>OpEx</option><option value="true"'+(x.isCogs?' selected':'')+'>COGS</option></select></div></div></div>';
-  h+='<div class="modal-foot"><button class="btn-d" id="mxDel">Delete</button><button class="btn-ghost" id="mxX">Cancel</button><button class="btn-p" id="mxSave">Save</button></div></div></div>';
+  if(USER.role!=='admin'&&USER.role!=='sales_manager')return;
+  var freqLabels={monthly:'Monthly',bimonthly:'Bi-Monthly',quarterly:'Quarterly',semi_annual:'Semi-Annual',annual:'Annual'};
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+x.vendor;
+  h+=' <span class="mtag" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span>';
+  if(x.isCogs) h+=' <span class="cogs-badge">COGS</span>';
+  h+='</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body">';
+  h+='<div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+fmt(x.amount)+'</div><div class="kl">Per Month</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--am)">'+fmt(x.amount*12)+'</div><div class="kl">Annual</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--txD)">'+(freqLabels[x.frequency]||'Monthly')+'</div><div class="kl">Frequency</div></div>';
+  h+='</div>';
+  h+='<div class="section-label">Vendor Details</div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Vendor Name</label><input id="mx-vn" value="'+(x.vendor||'')+'"></div>';
+  h+='<div class="mf"><label>Service Description</label><input id="mx-sd" value="'+(x.serviceDesc||x.subCat||'')+'"></div>';
+  h+='<div class="mf"><label>Contact Person</label><input id="mx-vc" value="'+(x.vendorContact||'')+'"></div>';
+  h+='<div class="mf"><label>Email</label><input id="mx-ve" type="email" value="'+(x.vendorEmail||'')+'"></div>';
+  h+='<div class="mf"><label>Phone</label><input id="mx-vp" value="'+(x.vendorPhone||'')+'"></div>';
+  h+='<div class="mf"><label>Department</label><select id="mx-dp">';
+  h+='<option'+(x.dept==='R&D'?' selected':'')+'>R&D</option>';
+  h+='<option'+(x.dept==='S&M'?' selected':'')+'>S&M</option>';
+  h+='<option'+(x.dept==='G&A'?' selected':'')+'>G&A</option>';
+  h+='<option'+(x.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='</div>';
+  h+='<div class="modal-sep"></div>';
+  h+='<div class="section-label">Cost</div>';
+  var xCur=x.currency||'ILS';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Currency</label><select id="mx-cur">';
+  h+='<option value="ILS"'+(xCur==='ILS'?' selected':'')+'>\u20AA ILS (Shekel)</option>';
+  h+='<option value="USD"'+(xCur==='USD'?' selected':'')+'>$ USD (Dollar)</option>';
+  h+='</select></div>';
+  h+='<div class="mf"><label>Amount</label><input id="mx-am" type="number" value="'+(x.amountOriginal||x.amount)+'"></div>';
+  h+='<div class="mf"><label>Frequency</label><select id="mx-fr">';
+  h+='<option value="monthly"'+(x.frequency==='monthly'?' selected':'')+'>Monthly</option>';
+  h+='<option value="bimonthly"'+(x.frequency==='bimonthly'?' selected':'')+'>Bi-Monthly</option>';
+  h+='<option value="quarterly"'+(x.frequency==='quarterly'?' selected':'')+'>Quarterly</option>';
+  h+='<option value="semi_annual"'+(x.frequency==='semi_annual'?' selected':'')+'>Semi-Annual</option>';
+  h+='<option value="annual"'+(x.frequency==='annual'?' selected':'')+'>Annual</option>';
+  h+='</select></div>';
+  h+='<div class="mf"><label>COGS?</label><select id="mx-cg">';
+  h+='<option value="false"'+(!x.isCogs?' selected':'')+'>No - OpEx</option>';
+  h+='<option value="true"'+(x.isCogs?' selected':'')+'>Yes - COGS</option></select></div>';
+  h+='</div></div>';
+  h+='<div class="modal-foot"><button class="btn-d" id="mxDel">Delete</button>';
+  h+='<button class="btn-ghost" id="mxX">Cancel</button>';
+  h+='<button class="btn-p" id="mxSave">Save</button></div></div></div>';
   document.body.insertAdjacentHTML('beforeend',h);
-  document.getElementById('modalClose').addEventListener('click',closeModal);document.getElementById('mxX').addEventListener('click',closeModal);document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
-  document.getElementById('mxDel').addEventListener('click',function(){if(!confirm('Delete?'))return;authFetch('/api/expenses/'+x.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted');loadAll().then(renderAll)}})});
-  document.getElementById('mxSave').addEventListener('click',function(){authFetch('/api/expenses/'+x.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vendor:document.getElementById('mx-vn').value,department:document.getElementById('mx-dp').value,monthlyAmount:parseFloat(document.getElementById('mx-am').value),isCogs:document.getElementById('mx-cg').value==='true'})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated');loadAll().then(renderAll)}})});
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('mxX').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
+  document.getElementById('mxDel').addEventListener('click',function(){
+    if(!confirm('Delete?'))return;
+    authFetch('/api/expenses/'+x.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted');loadAll().then(renderAll)}});
+  });
+  document.getElementById('mxSave').addEventListener('click',function(){
+    authFetch('/api/expenses/'+x.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      vendor:document.getElementById('mx-vn').value,
+      department:document.getElementById('mx-dp').value,
+      monthlyAmount:parseFloat(document.getElementById('mx-am').value),
+      isCogs:document.getElementById('mx-cg').value==='true',
+      serviceDesc:document.getElementById('mx-sd').value,
+      vendorContact:document.getElementById('mx-vc').value,
+      vendorEmail:document.getElementById('mx-ve').value,
+      vendorPhone:document.getElementById('mx-vp').value,
+      frequency:document.getElementById('mx-fr').value,
+      currency:document.getElementById('mx-cur').value
+    })}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Updated');loadAll().then(function(){closeModal();var updated=D.expenses.find(function(e){return e.id===x.id});if(updated)openExpenseCard(updated)})}});
+  });
+}
+
+function openEmployeeCard(e){
+  if(USER.role!=='admin')return;
+  var pct=e.positionPct||100;
+  var bonus=e.bonus||0;
+  var cur=e.currency||'ILS';
+  var curSym=cur==='ILS'?'\u20AA':'$';
+  var labor=e.laborCost;
+
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+e.name;
+  h+=' <span class="mtag" style="background:var(--ac)18;color:var(--ac)">'+e.dept+'</span>';
+  if(pct<100) h+=' <span class="mtag" style="background:var(--am)18;color:var(--am)">'+pct+'%</span>';
+  h+=' <span class="mtag" style="background:'+(cur==='ILS'?'var(--am)':'var(--gn)')+'18;color:'+(cur==='ILS'?'var(--am)':'var(--gn)')+'">'+cur+'</span>';
+  h+='</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body">';
+  h+='<div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+curSym+Math.round(e.gross).toLocaleString()+'</div><div class="kl">Gross ('+cur+')</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--am)">'+pct+'%</div><div class="kl">Position</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--gn)">'+fmt(labor)+'</div><div class="kl">Labor (USD)</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--pu)">'+fmt(labor*12)+'</div><div class="kl">Annual (USD)</div></div>';
+  h+='</div>';
+  h+='<div class="mf" style="margin-bottom:12px"><label>Formula</label>';
+  h+='<div style="font-size:12px;color:var(--txD);padding:4px 0">(Gross + Bonus) \u00d7 1.35 \u00d7 Position%'+(cur==='ILS'?' \u00f7 Exchange Rate':'')+'</div></div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Full Name</label><input id="me-nm" value="'+e.name+'"></div>';
+  h+='<div class="mf"><label>Department</label><select id="me-dp">';
+  h+='<option'+(e.dept==='R&D'?' selected':'')+'>R&D</option>';
+  h+='<option'+(e.dept==='S&M'?' selected':'')+'>S&M</option>';
+  h+='<option'+(e.dept==='G&A'?' selected':'')+'>G&A</option>';
+  h+='<option'+(e.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='<div class="mf"><label>Currency</label><select id="me-cur">';
+  h+='<option value="ILS"'+(cur==='ILS'?' selected':'')+'>\u20AA ILS (Shekel)</option>';
+  h+='<option value="USD"'+(cur==='USD'?' selected':'')+'>$ USD (Dollar)</option>';
+  h+='</select></div>';
+  h+='<div class="mf"><label>Gross Salary</label><input id="me-gr" type="number" value="'+e.gross+'"></div>';
+  h+='<div class="mf"><label>Position %</label><input id="me-pp" type="number" value="'+pct+'" min="0" max="100"></div>';
+  h+='<div class="mf"><label>Bonus / Additions</label><input id="me-bn" type="number" value="'+bonus+'"></div>';
+  h+='<div class="mf"><label>Termination Date</label><input id="me-td" type="date" value="'+(e.termDate||'')+'"><div class="hint">Empty = active</div></div>';
+  h+='</div></div>';
+  h+='<div class="modal-foot"><button class="btn-d" id="meDel">Delete</button>';
+  h+='<button class="btn-ghost" id="meX">Cancel</button>';
+  h+='<button class="btn-p" id="meSave">Save</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('meX').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+  document.getElementById('meDel').addEventListener('click',function(){
+    if(!confirm('Delete "'+e.name+'"?'))return;
+    authFetch('/api/employees/'+e.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted');loadAll().then(renderAll)}});
+  });
+  document.getElementById('meSave').addEventListener('click',function(){
+    authFetch('/api/employees/'+e.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name:document.getElementById('me-nm').value,
+      department:document.getElementById('me-dp').value,
+      gross:parseFloat(document.getElementById('me-gr').value),
+      positionPct:parseFloat(document.getElementById('me-pp').value),
+      bonus:parseFloat(document.getElementById('me-bn').value)||0,
+      currency:document.getElementById('me-cur').value,
+      termDate:document.getElementById('me-td').value||null
+    })}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Updated!');loadAll().then(function(){closeModal();var updated=D.employees.find(function(x){return x.id===e.id});if(updated)openEmployeeCard(updated)})}});
+  });
+}
+
+// ══════════════════════════════════════════
+// TEAM SETTINGS (sales_manager only)
+// ══════════════════════════════════════════
+function renderTeamSettings(el) {
+  var h = '<div class="fc">';
+  h += '<h3>Team Visibility Settings</h3>';
+  h += '<p style="color:var(--txD);font-size:13px;margin-bottom:20px">';
+  h += 'Control which team members can see all deals or only their own assigned deals.</p>';
+  h += '<div id="teamList" style="border:1px solid var(--bd);border-radius:12px;overflow:hidden"></div>';
+  h += '</div>';
+  el.innerHTML = h;
+
+  authFetch('/api/team').then(function(r) {
+    return r.json();
+  }).then(function(team) {
+    var tl = '';
+    team.forEach(function(m) {
+      if (m.id === USER.id) return;
+      var isOn = m.can_see_all;
+      tl += '<div style="display:flex;align-items:center;';
+      tl += 'justify-content:space-between;padding:14px 20px;';
+      tl += 'border-bottom:1px solid var(--bd)">';
+      tl += '<div>';
+      tl += '<div style="font-weight:700;font-size:14px">';
+      tl += m.display_name + '</div>';
+      tl += '<div style="font-size:11px;color:var(--txM)">';
+      tl += m.role + ' \u2022 @' + m.username + '</div>';
+      tl += '</div>';
+      tl += '<div style="display:flex;align-items:center;gap:10px">';
+      tl += '<span style="font-size:12px;color:';
+      tl += isOn ? 'var(--gn)' : 'var(--txM)';
+      tl += ';font-weight:600">';
+      tl += isOn ? 'Sees All Deals' : 'Own Deals Only';
+      tl += '</span>';
+      tl += '<button class="vis-tog" data-uid="' + m.id + '" ';
+      tl += 'data-cur="' + (isOn ? 'true' : 'false') + '" ';
+      tl += 'style="width:44px;height:24px;border-radius:12px;';
+      tl += 'border:none;cursor:pointer;position:relative;';
+      tl += 'background:' + (isOn ? 'var(--gn)' : 'var(--bd)');
+      tl += ';transition:all .25s">';
+      tl += '<div style="width:18px;height:18px;border-radius:9px;';
+      tl += 'background:#fff;position:absolute;top:3px;';
+      tl += 'left:' + (isOn ? '23px' : '3px');
+      tl += ';transition:all .25s;box-shadow:0 1px 3px rgba(0,0,0,.3)">';
+      tl += '</div></button></div></div>';
+    });
+    if (!tl) {
+      tl = '<div style="padding:20px;text-align:center;color:var(--txM)">';
+      tl += 'No team members to manage</div>';
+    }
+    document.getElementById('teamList').innerHTML = tl;
+
+    document.querySelectorAll('.vis-tog').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var uid = this.dataset.uid;
+        var cur = this.dataset.cur === 'true';
+        authFetch('/api/users/visibility', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uid, canSeeAll: !cur })
+        }).then(function(r) {
+          return r.json();
+        }).then(function(res) {
+          if (res.ok) {
+            toast(cur ? 'Set to Own Deals Only' : 'Set to See All Deals');
+            renderTeamSettings(el);
+          }
+        });
+      });
+    });
+  });
 }
 </script>
 </body>
