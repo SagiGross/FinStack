@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinStack CFO Command Center</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#0B0F1A;--card:#111827;--cardH:#1a2236;--sb:#0d1117;
+--bd:#1e293b;--bdL:#2a3a52;--tx:#e2e8f0;--txD:#94a3b8;--txM:#64748b;
+--ac:#3b82f6;--acL:#60a5fa;--acG:rgba(59,130,246,.15);
+--gn:#10b981;--gnG:rgba(16,185,129,.12);
+--rd:#ef4444;--rdG:rgba(239,68,68,.12);
+--am:#f59e0b;--pu:#8b5cf6;--cy:#06b6d4;--pk:#ec4899;--tl:#14b8a6;
+--f:'Outfit',system-ui,sans-serif;--fm:'JetBrains Mono',monospace;
+}
+body{font-family:var(--f);background:var(--bg);color:var(--tx);display:flex;min-height:100vh;overflow:hidden}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bdL);border-radius:3px}
+.sb{width:220px;background:var(--sb);border-right:1px solid var(--bd);display:flex;flex-direction:column;flex-shrink:0;transition:width .3s}.sb.col{width:64px}
+.sb-logo{padding:20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}.sb.col .sb-logo{justify-content:center;padding:20px 12px}
+.sb-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--ac),var(--pu));display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px var(--acG);flex-shrink:0;color:#fff;font-size:18px}
+.sb-brand{display:flex;flex-direction:column}.sb.col .sb-brand{display:none}
+.sb-brand h1{font-size:16px;font-weight:800;letter-spacing:-.5px}.sb-brand small{font-size:9px;font-weight:600;color:var(--txM);text-transform:uppercase;letter-spacing:1.5px}
+.sb-nav{padding:12px 8px;flex:1;display:flex;flex-direction:column;gap:2px}
+.sb-btn{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;border:none;cursor:pointer;background:transparent;color:var(--txD);width:100%;font-family:var(--f);font-size:13px;font-weight:500;transition:all .2s;position:relative}
+.sb.col .sb-btn{justify-content:center;padding:12px 0}.sb.col .sb-btn .lbl{display:none}
+.sb-btn.act{background:var(--acG);color:var(--acL);font-weight:700}
+.sb-btn.act::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:20px;border-radius:4px;background:var(--ac)}
+.sb-btn:hover:not(.act){background:rgba(255,255,255,.03);color:var(--tx)}
+.sb-col{padding:16px;border:none;cursor:pointer;background:transparent;color:var(--txM);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:center;font-size:18px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.hdr{padding:12px 24px;border-bottom:1px solid var(--bd);background:var(--sb);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.hdr-kpis{display:flex;gap:28px}.hdr-k{display:flex;align-items:center;gap:8px}
+.hdr-k-l{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--txM)}
+.hdr-k-v{font-size:15px;font-weight:800;font-family:var(--fm);letter-spacing:-.5px}
+.tog{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:10px;border:1px solid var(--bdL);background:var(--cardH);cursor:pointer;color:var(--tx);font-family:var(--f);font-size:12px;font-weight:600}
+.tog-track{width:36px;height:20px;border-radius:10px;position:relative;transition:.25s}.tog-track.on{background:var(--ac)}.tog-track.off{background:var(--txM)}
+.tog-thumb{width:16px;height:16px;border-radius:8px;background:#fff;position:absolute;top:2px;transition:.25s;box-shadow:0 1px 4px rgba(0,0,0,.3)}.tog-track.on .tog-thumb{left:18px}.tog-track.off .tog-thumb{left:2px}
+.content{flex:1;overflow:auto;padding:20px}
+.page{display:none}.page.act{display:block}
+/* Sub-tabs (pill style) */
+.subtabs{display:flex;gap:2px;margin-bottom:20px;background:var(--cardH);border-radius:12px;padding:4px;border:1px solid var(--bd);width:fit-content}
+.stab{padding:9px 22px;border-radius:10px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--f);background:transparent;color:var(--txD);transition:all .2s}
+.stab.act{background:var(--ac);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,.3)}
+.stab:hover:not(.act){color:var(--tx)}
+.stab-content{display:none}.stab-content.act{display:block}
+/* Cards */
+.kg{display:grid;gap:12px;margin-bottom:16px}
+.kg6{grid-template-columns:repeat(6,1fr)}.kg4{grid-template-columns:repeat(4,1fr)}.kg3{grid-template-columns:repeat(3,1fr)}.kg2{grid-template-columns:repeat(2,1fr)}
+.kpi{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px 20px;position:relative;overflow:hidden;animation:fsu .5s both}
+.kpi-g{position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;opacity:.06}
+.kpi-h{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.kpi-i{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.kpi-l{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--txM)}
+.kpi-v{font-size:26px;font-weight:800;letter-spacing:-1px;font-family:var(--fm);line-height:1}.kpi-s{font-size:12px;color:var(--txD);margin-top:8px}
+.cc{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+.cc-t{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;font-weight:700}
+.cg{display:grid;gap:14px;margin-bottom:14px}.cg2{grid-template-columns:1fr 1fr}.cg21{grid-template-columns:2fr 1fr}.cg12{grid-template-columns:1fr 2fr}
+.tw{background:var(--card);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin-bottom:14px}
+.tw-h{padding:16px 20px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.tw-h .ct{font-size:11px;color:var(--txM);margin-left:auto}
+table{width:100%;border-collapse:collapse}th{text-align:left;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--txM);border-bottom:1px solid var(--bd)}
+td{padding:10px 14px;font-size:12px;border-bottom:1px solid var(--bd)}tr.clickrow{cursor:pointer}tr.clickrow:hover td{background:var(--cardH)}
+.pill{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;display:inline-block}
+.cogs-badge{padding:2px 8px;border-radius:12px;font-size:9px;font-weight:700;background:rgba(245,158,11,.15);color:var(--am);letter-spacing:.5px}
+.mono{font-family:var(--fm)}
+/* Scenario */
+.cp{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:24px;margin-bottom:14px;box-shadow:0 0 40px var(--acG)}
+.cp-t{font-size:15px;font-weight:800;margin-bottom:18px}.cp-g{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+.sl{display:flex;flex-direction:column;gap:6px}.sl-h{display:flex;justify-content:space-between;align-items:center}
+.sl-l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--txD)}
+.sl-v{font-size:15px;font-weight:800;font-family:var(--fm)}
+input[type=range]{-webkit-appearance:none;width:100%;height:4px;background:var(--bd);border-radius:4px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer}
+/* Forms */
+.fc{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:24px;margin-bottom:16px}
+.fc h3{font-size:16px;font-weight:800;margin-bottom:16px}
+.fg-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.fg-grid.c2{grid-template-columns:1fr 1fr}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--txM)}
+.fg input,.fg select{background:var(--cardH);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-family:var(--f);font-size:13px;outline:none;transition:border .2s}
+.fg input:focus,.fg select:focus{border-color:var(--ac)}
+.btn-p{background:var(--ac);color:#fff;border:none;border-radius:10px;padding:12px 24px;font-family:var(--f);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;margin-top:8px}
+.btn-p:hover{background:var(--acL);transform:translateY(-1px)}
+.btn-d{background:transparent;color:var(--rd);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--f)}
+.btn-d:hover{background:var(--rdG)}
+.toast{position:fixed;top:20px;right:20px;background:var(--gn);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:999;animation:fsu .3s;display:none}
+/* Modal */
+.modal-bg{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:100;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s}
+.modal-card{background:var(--card);border:1px solid var(--bdL);border-radius:18px;width:560px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.5);animation:scaleIn .25s cubic-bezier(.4,0,.2,1)}
+.modal-head{padding:20px 24px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.modal-head h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px}
+.modal-head .mtag{font-size:10px;font-weight:700;padding:3px 10px;border-radius:12px;letter-spacing:.5px}
+.modal-close{width:32px;height:32px;border-radius:8px;border:1px solid var(--bd);background:transparent;color:var(--txD);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.modal-close:hover{background:var(--rdG);color:var(--rd);border-color:var(--rd)}
+.modal-body{padding:20px 24px}
+.modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mf{display:flex;flex-direction:column;gap:5px}
+.mf label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--txM)}
+.mf input,.mf select{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;color:var(--tx);font-family:var(--f);font-size:14px;outline:none;transition:border .2s}
+.mf input:focus,.mf select:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acG)}
+.mf .hint{font-size:10px;color:var(--txM);margin-top:2px}
+.modal-sep{height:1px;background:var(--bd);margin:16px 0}
+.modal-foot{padding:16px 24px 20px;border-top:1px solid var(--bd);display:flex;gap:10px;justify-content:flex-end}
+.modal-foot .btn-p{margin:0}
+.btn-ghost{background:transparent;color:var(--txD);border:1px solid var(--bd);border-radius:10px;padding:10px 20px;font-family:var(--f);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-ghost:hover{border-color:var(--txD);color:var(--tx)}
+.kpi-row{display:flex;gap:12px;margin-bottom:16px}
+.kpi-mini{flex:1;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;text-align:center}
+.kpi-mini .kv{font-size:20px;font-weight:800;font-family:var(--fm);letter-spacing:-.5px}
+.kpi-mini .kl{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--txM);margin-top:4px}
+@keyframes fsu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes scaleIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+@media(max-width:1200px){.kg6{grid-template-columns:repeat(3,1fr)}.fg-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:900px){.cg2,.cg21,.cg12{grid-template-columns:1fr}.kg6,.kg4{grid-template-columns:repeat(2,1fr)}.fg-grid{grid-template-columns:1fr}.subtabs{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR: Dashboard, Reports, Settings -->
+<div class="sb" id="sidebar">
+  <div class="sb-logo"><div class="sb-icon">&#9889;</div><div class="sb-brand"><h1>FinStack</h1><small>CFO Suite</small></div></div>
+  <div class="sb-nav" id="navBtns">
+    <button class="sb-btn act" data-t="dashboard">&#9632; <span class="lbl">Main Dashboard</span></button>
+    <button class="sb-btn" data-t="reports">&#9632; <span class="lbl">Reports</span></button>
+    <button class="sb-btn" data-t="settings">&#9632; <span class="lbl">Settings</span></button>
+  </div>
+  <button class="sb-col" id="colBtn">&#9664;</button>
+</div>
+
+<div class="main">
+  <div class="hdr"><div class="hdr-kpis" id="hdrK"></div><button class="tog" id="togBtn"><div class="tog-track on" id="togT"><div class="tog-thumb"></div></div><span id="togL">Weighted</span></button></div>
+  <div class="content">
+    <!-- PAGE: Main Dashboard (with 3 sub-tabs) -->
+    <div class="page act" id="pg-dashboard">
+      <div class="subtabs" id="dashTabs">
+        <button class="stab act" data-st="financial">Financial</button>
+        <button class="stab" data-st="sales">Sales Summaries</button>
+        <button class="stab" data-st="expenses">Expenses</button>
+      </div>
+      <div class="stab-content act" id="st-financial"></div>
+      <div class="stab-content" id="st-sales"></div>
+      <div class="stab-content" id="st-expenses"></div>
+    </div>
+    <!-- PAGE: Reports (pipeline + scenario) -->
+    <div class="page" id="pg-reports">
+      <div class="subtabs" id="repTabs">
+        <button class="stab act" data-st="pipeline">Pipeline</button>
+        <button class="stab" data-st="scenario">What-If Scenario</button>
+      </div>
+      <div class="stab-content act" id="st-pipeline"></div>
+      <div class="stab-content" id="st-scenario"></div>
+    </div>
+    <!-- PAGE: Settings (data entry) -->
+    <div class="page" id="pg-settings">
+      <div class="subtabs" id="setTabs">
+        <button class="stab act" data-st="contracts">Contracts</button>
+        <button class="stab" data-st="employees">Employees</button>
+        <button class="stab" data-st="expentry">Expenses</button>
+      </div>
+      <div class="stab-content act" id="st-contracts"></div>
+      <div class="stab-content" id="st-employees"></div>
+      <div class="stab-content" id="st-expentry"></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';s.onload=init;document.head.appendChild(s)})();
+
+var W=true,SD=0,SG=0,SS=15000,D=null,SA=null,charts={};
+var MO=['01','02','03','04','05','06','07','08','09','10','11','12'];
+function fmt(n){if(n==null)return'\u2014';var a=Math.abs(n);if(a>=1e6)return'$'+(n/1e6).toFixed(2)+'M';if(a>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
+function fmtP(n){return n==null?'\u2014':n.toFixed(1)+'%'}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(function(){t.style.display='none'},2500)}
+function kpi(ic,lb,vl,sb,co,dl){return'<div class="kpi" style="animation-delay:'+(dl||0)+'ms"><div class="kpi-g" style="background:'+co+'"></div><div class="kpi-h"><div class="kpi-i" style="background:'+co+'18;color:'+co+'">'+ic+'</div><span class="kpi-l">'+lb+'</span></div><div class="kpi-v">'+vl+'</div><div class="kpi-s">'+sb+'</div></div>'}
+
+function mk(id,cfg){if(charts[id])charts[id].destroy();var c=document.getElementById(id);if(!c)return;Chart.defaults.font.family="'Outfit',system-ui,sans-serif";Chart.defaults.color='#94a3b8';var o=cfg.options||{};o.responsive=true;o.maintainAspectRatio=false;if(!o.plugins)o.plugins={};if(!o.scales)o.scales={};if(!o.scales.x)o.scales.x={};if(!o.scales.y)o.scales.y={};o.scales.x.grid={color:'#1e293b',drawBorder:false};o.scales.x.ticks=Object.assign({font:{size:10,family:"var(--fm)"}},o.scales.x.ticks||{});o.scales.y.grid={color:'#1e293b',drawBorder:false};o.scales.y.ticks=Object.assign({font:{size:10,family:"var(--fm)"},callback:function(v){return fmt(v)}},o.scales.y.ticks||{});cfg.options=o;charts[id]=new Chart(c,cfg)}
+
+// ── Navigation ──
+document.getElementById('navBtns').addEventListener('click',function(e){var b=e.target.closest('.sb-btn');if(!b)return;document.querySelectorAll('.sb-btn').forEach(function(x){x.classList.remove('act')});document.querySelectorAll('.page').forEach(function(x){x.classList.remove('act')});b.classList.add('act');document.getElementById('pg-'+b.dataset.t).classList.add('act');setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
+document.getElementById('colBtn').addEventListener('click',function(){var sb=document.getElementById('sidebar');sb.classList.toggle('col');this.innerHTML=sb.classList.contains('col')?'&#9654;':'&#9664;';setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},350)});
+document.getElementById('togBtn').addEventListener('click',function(){W=!W;document.getElementById('togT').className='tog-track '+(W?'on':'off');document.getElementById('togL').textContent=W?'Weighted':'Full Pipeline';loadAll().then(renderAll)});
+
+// Sub-tab switching (generic)
+['dashTabs','repTabs','setTabs'].forEach(function(tid){
+  document.getElementById(tid).addEventListener('click',function(e){
+    var b=e.target.closest('.stab');if(!b)return;
+    var parent=b.parentElement;
+    parent.querySelectorAll('.stab').forEach(function(x){x.classList.remove('act')});
+    b.classList.add('act');
+    // Show matching content
+    var page=parent.parentElement;
+    page.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});
+    document.getElementById('st-'+b.dataset.st).classList.add('act');
+    setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100);
+  });
+});
+
+// ── Data loading ──
+function loadAll(){
+  return Promise.all([
+    fetch('/api/data?weighted='+W+'&delay='+SD+'&ghosts='+SG+'&salary='+SS).then(function(r){return r.json()}).then(function(d){D=d}),
+    fetch('/api/sales-analytics?weighted='+W).then(function(r){return r.json()}).then(function(d){SA=d})
+  ]);
+}
+
+// ══════════════════════════════════════════
+// RENDER: Header
+// ══════════════════════════════════════════
+function renderHeader(){
+  var d=D.summary,last=d[d.length-1];
+  var tr=d.reduce(function(s,m){return s+m.revenue},0);
+  var ab=d.reduce(function(s,m){return s+m.totalExp},0)/12;
+  var items=[{l:'Cash',v:fmt(last.cumCash),c:last.cumCash>=0?'var(--gn)':'var(--rd)'},{l:'Burn/mo',v:fmt(ab),c:'var(--am)'},{l:'Runway',v:last.runway?last.runway.toFixed(1)+' mo':'\u221e',c:'var(--cy)'},{l:'FY Rev',v:fmt(tr),c:'var(--gn)'}];
+  var h='';for(var i=0;i<items.length;i++){var k=items[i];h+='<div class="hdr-k"><div style="color:'+k.c+';font-size:14px">\u25CF</div><div><div class="hdr-k-l">'+k.l+'</div><div class="hdr-k-v" style="color:'+k.c+'">'+k.v+'</div></div></div>'}
+  document.getElementById('hdrK').innerHTML=h;
+}
+
+// ══════════════════════════════════════════
+// SUB-TAB 1: Financial
+// ══════════════════════════════════════════
+function renderFinancial(){
+  var d=D.summary;
+  var tr=d.reduce(function(s,m){return s+m.revenue},0),tc=d.reduce(function(s,m){return s+m.cogs},0),tn=d.reduce(function(s,m){return s+m.netIncome},0),ab=d.reduce(function(s,m){return s+m.totalExp},0)/12,ag=d.reduce(function(s,m){return s+m.grossMargin},0)/12,last=d[d.length-1];
+  var h='<div class="kg kg6">';
+  h+=kpi('\u2197','Revenue',fmt(tr),'FY 2026','var(--gn)',0);
+  h+=kpi('\u2593','Gross Margin',fmtP(ag),'COGS '+fmt(tc),'var(--am)',50);
+  h+=kpi('$','Net Income',fmt(tn),'After OpEx',tn>=0?'var(--gn)':'var(--rd)',100);
+  h+=kpi('\u2248','Avg Burn',fmt(ab),'Monthly','var(--pu)',150);
+  h+=kpi('\u2587','End Cash',fmt(last.cumCash),'Dec 2026','var(--ac)',200);
+  h+=kpi('\u23F1','Runway',last.runway?last.runway.toFixed(1)+' mo':'\u221e','Current rate','var(--cy)',250);
+  h+='</div><div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t">Monthly P&L</div><div style="height:280px"><canvas id="chPL"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Cash Position</div><div style="height:280px"><canvas id="chCash"></canvas></div></div>';
+  h+='</div><div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t">Gross Margin %</div><div style="height:260px"><canvas id="chGM"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Monthly Burn</div><div style="height:260px"><canvas id="chBurn"></canvas></div></div></div>';
+  document.getElementById('st-financial').innerHTML=h;
+  mk('chPL',{type:'bar',data:{labels:MO,datasets:[{label:'Revenue',data:d.map(function(m){return m.revenue}),backgroundColor:'#10b981cc',borderRadius:5,order:2},{label:'COGS',data:d.map(function(m){return m.cogs}),backgroundColor:'#f59e0bbb',borderRadius:5,order:2},{label:'OpEx',data:d.map(function(m){return m.opex}),backgroundColor:'#8b5cf6aa',borderRadius:5,order:2},{label:'Net',data:d.map(function(m){return m.netIncome}),type:'line',borderColor:'#06b6d4',borderWidth:2.5,pointRadius:0,tension:.4,order:1}]}});
+  mk('chCash',{type:'bar',data:{labels:MO,datasets:[{label:'In',data:d.map(function(m){return m.cashIn}),backgroundColor:'#10b981aa',borderRadius:4,order:2},{label:'Out',data:d.map(function(m){return m.cashOut}),backgroundColor:'#ef444488',borderRadius:4,order:2},{label:'Cumulative',data:d.map(function(m){return m.cumCash}),type:'line',borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.1)',fill:true,borderWidth:2.5,pointRadius:0,tension:.4,order:1}]}});
+  mk('chGM',{type:'line',data:{labels:MO,datasets:[{label:'GM%',data:d.map(function(m){return m.grossMargin}),borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.1)',fill:true,borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',pointBorderWidth:2,tension:.4}]},options:{scales:{y:{ticks:{callback:function(v){return v+'%'}}}},plugins:{legend:{display:false}}}});
+  mk('chBurn',{type:'bar',data:{labels:MO,datasets:[{label:'Burn',data:d.map(function(m){return m.burnRate}),backgroundColor:d.map(function(m){return m.burnRate>150000?'#ef4444cc':m.burnRate>100000?'#f59e0bcc':'#10b981cc'}),borderRadius:5}]},options:{plugins:{legend:{display:false}}}});
+}
+
+// ══════════════════════════════════════════
+// SUB-TAB 2: Sales Summaries
+// ══════════════════════════════════════════
+function renderSales(){
+  var s=SA;
+  var tc={'Government':'var(--ac)','Enterprise':'var(--pk)','Academy':'var(--gn)'};
+  var h='<div class="kg kg4">';
+  h+=kpi('\u25CE','Total Revenue',fmt(s.total),s.dealCount+' deals '+(s.weighted?'(weighted)':'(full)'),'var(--ac)',0);
+  h+=kpi('\u2605','Top Sector',s.topType||'\u2014',s.byType[s.topType]?fmt(s.byType[s.topType].total):'',tc[s.topType]||'var(--ac)',50);
+  h+=kpi('\u2609','Top Country',s.topCountry||'\u2014',s.byCountry[s.topCountry]?fmt(s.byCountry[s.topCountry].total):'','var(--cy)',100);
+  h+=kpi('%','Avg Deal',s.dealCount>0?fmt(s.total/s.dealCount):'\u2014',s.dealCount+' contracts','var(--am)',150);
+  h+='</div>';
+  h+='<div class="cg cg2">';
+  h+='<div class="cc"><div class="cc-t">Revenue by Customer Type</div><div style="height:300px"><canvas id="chSType"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Revenue by Country (Top 10)</div><div style="height:300px"><canvas id="chSCountry"></canvas></div></div>';
+  h+='</div>';
+  // Type detail table
+  h+='<div class="tw"><div class="tw-h">Sector Breakdown</div>';
+  h+='<div style="overflow-x:auto"><table><thead><tr>';
+  h+='<th>Sector</th><th>Revenue</th><th>% of Total</th><th>Deals</th>';
+  h+='</tr></thead><tbody>';
+  var types=Object.keys(s.byType).sort(function(a,b){return s.byType[b].total-s.byType[a].total});
+  types.forEach(function(t){
+    var d=s.byType[t];var col=tc[t]||'var(--txM)';
+    h+='<tr><td><span class="pill" style="background:'+col+'18;color:'+col+'">'+t+'</span></td>';
+    h+='<td class="mono" style="font-weight:700">'+fmt(d.total)+'</td>';
+    h+='<td class="mono">'+d.pct+'%</td>';
+    h+='<td class="mono">'+d.count+'</td></tr>';
+  });
+  h+='</tbody></table></div></div>';
+  document.getElementById('st-sales').innerHTML=h;
+
+  // Charts
+  var tNames=Object.keys(s.byType);
+  var tVals=tNames.map(function(t){return s.byType[t].total});
+  var tCols=tNames.map(function(t){return t==='Government'?'#3b82f6':t==='Enterprise'?'#ec4899':'#10b981'});
+  mk('chSType',{type:'doughnut',data:{labels:tNames,datasets:[{data:tVals,backgroundColor:tCols,borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
+
+  var cNames=Object.keys(s.byCountry);
+  var cVals=cNames.map(function(c){return s.byCountry[c].total});
+  mk('chSCountry',{type:'bar',data:{labels:cNames,datasets:[{label:'Revenue',data:cVals,backgroundColor:'#3b82f6',borderRadius:5}]},options:{indexAxis:'y',scales:{x:{ticks:{callback:function(v){return fmt(v)}}},y:{ticks:{font:{size:11}}}},plugins:{legend:{display:false}}}});
+}
+
+// ══════════════════════════════════════════
+// SUB-TAB 3: Expenses
+// ══════════════════════════════════════════
+function renderExpenses(){
+  var d=D.summary;
+  var an={"R&D":0,"S&M":0,"G&A":0,"Training":0};
+  var depts=["R&D","S&M","G&A","Training"];
+  d.forEach(function(m){depts.forEach(function(k){an[k]+=(m.lab[k]||0)+(m.vd[k]||0)})});
+  var cols=['var(--ac)','var(--pk)','var(--tl)','var(--am)'];
+  var h='<div class="kg kg4">';
+  depts.forEach(function(dept,i){h+=kpi(['\u2692','\u263A','\u2302','\u2709'][i],dept,fmt(an[dept]),'Annual',cols[i],i*50)});
+  h+='</div>';
+  h+='<div class="cg cg21">';
+  h+='<div class="cc"><div class="cc-t">By Department</div><div style="height:300px"><canvas id="chDept"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Split</div><div style="height:300px"><canvas id="chPie"></canvas></div></div></div>';
+  h+='<div class="cc"><div class="cc-t">Labor vs Vendor</div><div style="height:240px"><canvas id="chLV"></canvas></div></div>';
+  // Expense list
+  h+='<div class="tw"><div class="tw-h">All Expenses <span class="ct" id="xCntMain">'+D.expenses.length+'</span></div>';
+  h+='<div style="overflow-x:auto;max-height:300px"><table><thead><tr>';
+  h+='<th>Vendor</th><th>Dept</th><th>Monthly</th><th>Type</th>';
+  h+='</tr></thead><tbody id="xRowsMain"></tbody></table></div></div>';
+  document.getElementById('st-expenses').innerHTML=h;
+
+  mk('chDept',{type:'bar',data:{labels:MO,datasets:[{label:'R&D',data:d.map(function(m){return(m.lab["R&D"]||0)+(m.vd["R&D"]||0)}),backgroundColor:'#3b82f6',stack:'s'},{label:'S&M',data:d.map(function(m){return(m.lab["S&M"]||0)+(m.vd["S&M"]||0)}),backgroundColor:'#ec4899',stack:'s'},{label:'G&A',data:d.map(function(m){return(m.lab["G&A"]||0)+(m.vd["G&A"]||0)}),backgroundColor:'#14b8a6',stack:'s'},{label:'Training',data:d.map(function(m){return(m.lab["Training"]||0)+(m.vd["Training"]||0)}),backgroundColor:'#f59e0b',stack:'s',borderRadius:{topLeft:5,topRight:5}}]}});
+  mk('chPie',{type:'doughnut',data:{labels:depts,datasets:[{data:depts.map(function(k){return Math.round(an[k])}),backgroundColor:['#3b82f6','#ec4899','#14b8a6','#f59e0b'],borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
+  mk('chLV',{type:'bar',data:{labels:MO,datasets:[{label:'Labor',data:d.map(function(m){var t=0;for(var k in m.lab)t+=m.lab[k];return t}),backgroundColor:'#3b82f6cc',borderRadius:5},{label:'Vendor',data:d.map(function(m){var t=0;for(var k in m.vd)t+=m.vd[k];return t}),backgroundColor:'#f59e0bcc',borderRadius:5}]}});
+
+  // Fill expense table (clickable)
+  var xr='';
+  D.expenses.forEach(function(x){
+    var badge=x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx';
+    xr+='<tr class="clickrow" data-xid="'+x.id+'">';
+    xr+='<td style="font-weight:600">'+x.vendor+'</td>';
+    xr+='<td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td>';
+    xr+='<td class="mono">'+fmt(x.amount)+'/mo</td>';
+    xr+='<td>'+badge+'</td></tr>';
+  });
+  document.getElementById('xRowsMain').innerHTML=xr;
+  document.querySelectorAll('#xRowsMain .clickrow').forEach(function(row){
+    row.addEventListener('click',function(){var x=D.expenses.find(function(e){return e.id===row.dataset.xid});if(x)openExpenseCard(x)});
+  });
+}
+
+// ══════════════════════════════════════════
+// REPORTS: Pipeline
+// ══════════════════════════════════════════
+function renderPipeline(){
+  var c=D.contracts,tp=0,tw=0;c.forEach(function(x){tp+=x.value;tw+=x.weighted});
+  var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};
+  var bI={};c.forEach(function(x){if(!bI[x.industry])bI[x.industry]={t:0,w:0};bI[x.industry].t+=x.value;bI[x.industry].w+=x.weighted});
+  var iN=Object.keys(bI).sort(function(a,b){return bI[b].w-bI[a].w});
+  var rows='';
+  c.forEach(function(x){var col=ic[x.industry]||'var(--txM)';var chT=x.chance!=null?(x.chance*100).toFixed(0)+'%':'\u2014';var chC=x.chance!=null?(x.chance>=.75?'var(--gn)':x.chance>=.5?'var(--am)':'var(--rd)'):'var(--txM)';
+    rows+='<tr class="clickrow" data-cid="'+x.id+'">';
+    rows+='<td style="font-weight:600">'+x.client+'</td>';
+    rows+='<td style="color:var(--txD)">'+x.country+'</td>';
+    rows+='<td><span class="pill" style="background:'+col+'18;color:'+col+'">'+x.industry+'</span></td>';
+    rows+='<td class="mono" style="font-weight:700">'+fmt(x.value)+'</td>';
+    rows+='<td class="mono" style="color:'+chC+';font-weight:700">'+chT+'</td>';
+    rows+='<td class="mono" style="font-weight:700;color:var(--acL)">'+fmt(x.weighted)+'</td>';
+    rows+='<td class="mono" style="color:var(--txD)">'+x.dso+'d</td></tr>';
+  });
+  var h='<div class="kg kg3">';
+  h+=kpi('\u25CE','Pipeline',fmt(tp),c.length+' deals','var(--ac)');
+  h+=kpi('\u26A1','Expected',fmt(tw),'Weighted','var(--gn)',50);
+  h+=kpi('%','Conversion',tp>0?fmtP(tw/tp*100):'\u2014','W/T','var(--am)',100);
+  h+='</div>';
+  h+='<div class="cc"><div class="cc-t">By Industry</div><div style="height:180px"><canvas id="chInd"></canvas></div></div>';
+  h+='<div class="tw"><div class="tw-h">Deal Pipeline<span class="ct">'+c.length+'</span></div>';
+  h+='<div style="overflow-x:auto;max-height:400px"><table><thead><tr><th>Client</th><th>Country</th><th>Industry</th><th>Value</th><th>Chance</th><th>Expected</th><th>DSO</th></tr></thead><tbody id="pipRows">'+rows+'</tbody></table></div></div>';
+  document.getElementById('st-pipeline').innerHTML=h;
+  mk('chInd',{type:'bar',data:{labels:iN,datasets:[{label:'Total',data:iN.map(function(n){return bI[n].t}),backgroundColor:'#3b82f640'},{label:'Weighted',data:iN.map(function(n){return bI[n].w}),backgroundColor:'#3b82f6'}]},options:{indexAxis:'y',scales:{x:{ticks:{callback:function(v){return fmt(v)}}},y:{ticks:{font:{size:11}}}}}});
+  // Click to open contract card
+  document.querySelectorAll('#pipRows .clickrow').forEach(function(row){
+    row.addEventListener('click',function(){var c=D.contracts.find(function(x){return x.id===row.dataset.cid});if(c)openContractCard(c)});
+  });
+}
+
+// ══════════════════════════════════════════
+// REPORTS: Scenario
+// ══════════════════════════════════════════
+function renderScenario(){
+  Promise.all([
+    fetch('/api/data?weighted=true&delay=0&ghosts=0&salary=15000').then(function(r){return r.json()}),
+    fetch('/api/data?weighted=true&delay='+SD+'&ghosts='+SG+'&salary='+SS).then(function(r){return r.json()})
+  ]).then(function(res){
+    var bs=res[0].summary,sc=res[1].summary;
+    var bde=sc.reduce(function(s,m){return s+m.totalExp},0)-bs.reduce(function(s,m){return s+m.totalExp},0);
+    var h='<div class="cp"><div class="cp-t">Scenario Controls</div><div class="cp-g">';
+    h+='<div class="sl"><div class="sl-h"><span class="sl-l">Sales Delay</span><span class="sl-v" style="color:var(--am)" id="sdV">'+SD+' days</span></div><input type="range" min="0" max="180" step="15" value="'+SD+'" style="accent-color:var(--am)" id="sdR"></div>';
+    h+='<div class="sl"><div class="sl-h"><span class="sl-l">Ghost Hires</span><span class="sl-v" style="color:var(--pu)" id="sgV">'+SG+'</span></div><input type="range" min="0" max="10" value="'+SG+'" style="accent-color:var(--pu)" id="sgR"></div>';
+    h+='<div class="sl"><div class="sl-h"><span class="sl-l">Salary</span><span class="sl-v" style="color:var(--cy)" id="ssV">'+fmt(SS)+'</span></div><input type="range" min="5000" max="30000" step="1000" value="'+SS+'" style="accent-color:var(--cy)" id="ssR"></div>';
+    h+='</div></div>';
+    h+='<div class="kg kg4">';
+    h+=kpi('\u263A','Headcount','+'+SG,fmt(SS)+' x 1.35','var(--pu)');
+    h+=kpi('\u2248','Extra/mo',fmt(SG*SS*1.35),'Added','var(--rd)',50);
+    h+=kpi('\u2587','Delta',fmt(bde),'vs Base',bde>0?'var(--rd)':'var(--gn)',100);
+    h+=kpi('$','End Cash',fmt(sc[11].cumCash),'Base: '+fmt(bs[11].cumCash),'var(--ac)',150);
+    h+='</div><div class="cg cg2">';
+    h+='<div class="cc"><div class="cc-t">Burn Comparison</div><div style="height:280px"><canvas id="chSB"></canvas></div></div>';
+    h+='<div class="cc"><div class="cc-t">Cash Trajectory</div><div style="height:280px"><canvas id="chSC"></canvas></div></div></div>';
+    document.getElementById('st-scenario').innerHTML=h;
+    var dbn;function oS(){clearTimeout(dbn);dbn=setTimeout(renderScenario,300)}
+    document.getElementById('sdR').addEventListener('input',function(){SD=+this.value;document.getElementById('sdV').textContent=SD+' days';oS()});
+    document.getElementById('sgR').addEventListener('input',function(){SG=+this.value;document.getElementById('sgV').textContent=SG;oS()});
+    document.getElementById('ssR').addEventListener('input',function(){SS=+this.value;document.getElementById('ssV').textContent=fmt(SS);oS()});
+    mk('chSB',{type:'bar',data:{labels:MO,datasets:[{label:'Base',data:bs.map(function(m){return m.totalExp}),backgroundColor:'#3b82f666',borderRadius:4},{label:'Scenario',data:sc.map(function(m){return m.totalExp}),backgroundColor:'#ef4444cc',borderRadius:4}]}});
+    mk('chSC',{type:'line',data:{labels:MO,datasets:[{label:'Base',data:bs.map(function(m){return m.cumCash}),borderColor:'#3b82f6',borderWidth:2.5,pointRadius:0,tension:.4},{label:'Scenario',data:sc.map(function(m){return m.cumCash}),borderColor:'#ef4444',borderWidth:2.5,borderDash:[8,4],pointRadius:0,tension:.4}]}});
+  });
+}
+
+// ══════════════════════════════════════════
+// SETTINGS: Data entry forms + tables
+// ══════════════════════════════════════════
+function renderSettings(){
+  // Contracts
+  var hc='<div class="fc"><h3>Add New Contract</h3><div class="fg-grid">';
+  hc+='<div class="fg"><label>Client *</label><input id="fc-cl" placeholder="e.g. Ministry of Defence"></div>';
+  hc+='<div class="fg"><label>Country</label><input id="fc-co" placeholder="e.g. Israel"></div>';
+  hc+='<div class="fg"><label>Industry</label><select id="fc-in"><option>Government</option><option>Enterprise</option><option>Academy</option></select></div>';
+  hc+='<div class="fg"><label>Value (USD) *</label><input id="fc-va" type="number" placeholder="100000"></div>';
+  hc+='<div class="fg"><label>Signing Date *</label><input id="fc-sd" type="date" value="2026-01-01"></div>';
+  hc+='<div class="fg"><label>DSO</label><input id="fc-ds" type="number" value="60"></div>';
+  hc+='<div class="fg"><label>Probability %</label><input id="fc-ch" type="number" placeholder="75" min="0" max="100"></div>';
+  hc+='<div class="fg"><label>Monthly?</label><select id="fc-mo"><option value="false">No</option><option value="true">Yes</option></select></div>';
+  hc+='</div><button class="btn-p" id="btnC">Add Contract</button></div>';
+  hc+='<div class="tw"><div class="tw-h">Contracts <span class="ct" id="cCnt">'+D.contracts.length+'</span></div>';
+  hc+='<div style="overflow-x:auto;max-height:350px"><table><thead><tr><th>Client</th><th>Country</th><th>Industry</th><th>Value</th><th>Chance</th><th>DSO</th></tr></thead><tbody id="cRows"></tbody></table></div></div>';
+  document.getElementById('st-contracts').innerHTML=hc;
+
+  // Employees
+  var he='<div class="fc"><h3>Add New Employee</h3><div class="fg-grid c2">';
+  he+='<div class="fg"><label>Name *</label><input id="fe-nm" placeholder="e.g. John Doe"></div>';
+  he+='<div class="fg"><label>Department</label><select id="fe-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+  he+='<div class="fg"><label>Gross (USD) *</label><input id="fe-gr" type="number" placeholder="12000"></div>';
+  he+='<div class="fg"><label>Hire Date</label><input id="fe-hd" type="date" value="2026-01-01"></div>';
+  he+='</div><button class="btn-p" id="btnE">Add Employee</button></div>';
+  he+='<div class="tw"><div class="tw-h">Employees <span class="ct" id="eCnt">'+D.employees.length+'</span></div>';
+  he+='<div style="overflow-x:auto;max-height:300px"><table><thead><tr><th>Name</th><th>Dept</th><th>Gross</th><th>Labor Cost</th></tr></thead><tbody id="eRows"></tbody></table></div></div>';
+  document.getElementById('st-employees').innerHTML=he;
+
+  // Expenses entry
+  var hx='<div class="fc"><h3>Add New Expense</h3><div class="fg-grid c2">';
+  hx+='<div class="fg"><label>Vendor *</label><input id="fx-vn" placeholder="e.g. AWS"></div>';
+  hx+='<div class="fg"><label>Department</label><select id="fx-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+  hx+='<div class="fg"><label>Category</label><input id="fx-sc" placeholder="e.g. Cloud"></div>';
+  hx+='<div class="fg"><label>Monthly (USD) *</label><input id="fx-am" type="number" placeholder="2500"></div>';
+  hx+='<div class="fg"><label>Is COGS?</label><select id="fx-cg"><option value="false">No - OpEx</option><option value="true">Yes - COGS</option></select></div>';
+  hx+='</div><button class="btn-p" id="btnX">Add Expense</button></div>';
+  hx+='<div class="tw"><div class="tw-h">Expenses <span class="ct" id="xCnt">'+D.expenses.length+'</span></div>';
+  hx+='<div style="overflow-x:auto;max-height:300px"><table><thead><tr><th>Vendor</th><th>Dept</th><th>Monthly</th><th>Type</th></tr></thead><tbody id="xRows"></tbody></table></div></div>';
+  document.getElementById('st-expentry').innerHTML=hx;
+
+  fillSettingsTables();
+  bindAddButtons();
+}
+
+function fillSettingsTables(){
+  // Contracts
+  var cr='';
+  D.contracts.slice(-20).reverse().forEach(function(c){
+    var chT=c.chance!=null?(c.chance*100).toFixed(0)+'%':'\u2014';
+    var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};var col=ic[c.industry]||'var(--txM)';
+    cr+='<tr class="clickrow" data-cid="'+c.id+'">';
+    cr+='<td style="font-weight:600">'+c.client+'</td>';
+    cr+='<td style="color:var(--txD)">'+c.country+'</td>';
+    cr+='<td><span class="pill" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span></td>';
+    cr+='<td class="mono" style="font-weight:700">'+fmt(c.value)+'</td>';
+    cr+='<td class="mono">'+chT+'</td>';
+    cr+='<td class="mono" style="color:var(--txD)">'+c.dso+'d</td></tr>';
+  });
+  document.getElementById('cRows').innerHTML=cr;
+  document.getElementById('cCnt').textContent=D.contracts.length;
+  document.querySelectorAll('#cRows .clickrow').forEach(function(r){r.addEventListener('click',function(){var c=D.contracts.find(function(x){return x.id===r.dataset.cid});if(c)openContractCard(c)})});
+
+  // Employees
+  var er='';
+  D.employees.forEach(function(e){
+    er+='<tr class="clickrow" data-eid="'+e.id+'">';
+    er+='<td style="font-weight:600">'+e.name+'</td>';
+    er+='<td><span class="pill" style="background:var(--ac)18;color:var(--ac)">'+e.dept+'</span></td>';
+    er+='<td class="mono">'+fmt(e.gross)+'</td>';
+    er+='<td class="mono" style="color:var(--gn)">'+fmt(e.laborCost)+'</td></tr>';
+  });
+  document.getElementById('eRows').innerHTML=er;
+  document.getElementById('eCnt').textContent=D.employees.length;
+  document.querySelectorAll('#eRows .clickrow').forEach(function(r){r.addEventListener('click',function(){var e=D.employees.find(function(x){return x.id===r.dataset.eid});if(e)openEmployeeCard(e)})});
+
+  // Expenses
+  var xr='';
+  D.expenses.forEach(function(x){
+    var badge=x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx';
+    xr+='<tr class="clickrow" data-xid="'+x.id+'">';
+    xr+='<td style="font-weight:600">'+x.vendor+'</td>';
+    xr+='<td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td>';
+    xr+='<td class="mono">'+fmt(x.amount)+'/mo</td>';
+    xr+='<td>'+badge+'</td></tr>';
+  });
+  document.getElementById('xRows').innerHTML=xr;
+  document.getElementById('xCnt').textContent=D.expenses.length;
+  document.querySelectorAll('#xRows .clickrow').forEach(function(r){r.addEventListener('click',function(){var x=D.expenses.find(function(e){return e.id===r.dataset.xid});if(x)openExpenseCard(x)})});
+}
+
+function bindAddButtons(){
+  document.getElementById('btnC').addEventListener('click',function(){
+    var cl=document.getElementById('fc-cl').value,va=parseFloat(document.getElementById('fc-va').value);
+    if(!cl||!va){toast('Fill client and value');return}
+    var ch=document.getElementById('fc-ch').value;
+    fetch('/api/contracts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client:cl,country:document.getElementById('fc-co').value,industry:document.getElementById('fc-in').value,value:va,signingDate:document.getElementById('fc-sd').value,dso:parseInt(document.getElementById('fc-ds').value)||60,monthly:document.getElementById('fc-mo').value==='true',chance:ch?parseFloat(ch)/100:null})}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Contract added! Pay: '+res.paymentMonth);document.getElementById('fc-cl').value='';document.getElementById('fc-va').value='';document.getElementById('fc-ch').value='';loadAll().then(renderAll)}});
+  });
+  document.getElementById('btnE').addEventListener('click',function(){
+    var nm=document.getElementById('fe-nm').value,gr=parseFloat(document.getElementById('fe-gr').value);
+    if(!nm||!gr){toast('Fill name and salary');return}
+    fetch('/api/employees',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,department:document.getElementById('fe-dp').value,gross:gr,hireDate:document.getElementById('fe-hd').value})}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Employee added! Labor: $'+res.laborCost);document.getElementById('fe-nm').value='';document.getElementById('fe-gr').value='';loadAll().then(renderAll)}});
+  });
+  document.getElementById('btnX').addEventListener('click',function(){
+    var vn=document.getElementById('fx-vn').value,am=parseFloat(document.getElementById('fx-am').value);
+    if(!vn||!am){toast('Fill vendor and amount');return}
+    fetch('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vendor:vn,department:document.getElementById('fx-dp').value,subCategory:document.getElementById('fx-sc').value,monthlyAmount:am,isCogs:document.getElementById('fx-cg').value==='true'})}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Expense added!');document.getElementById('fx-vn').value='';document.getElementById('fx-am').value='';loadAll().then(renderAll)}});
+  });
+}
+
+// ══════════════════════════════════════════
+// MODAL CARDS
+// ══════════════════════════════════════════
+function closeModal(){var el=document.getElementById('modalOverlay');if(el)el.remove()}
+
+function openContractCard(c){
+  var chV=c.chance!=null?(c.chance*100).toFixed(0):'';
+  var wv=c.chance!=null?c.value*c.chance:0;
+  var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};var col=ic[c.industry]||'var(--txM)';
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+c.client+' <span class="mtag" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span>';
+  if(c.monthly)h+=' <span class="mtag" style="background:var(--cy)18;color:var(--cy)">Monthly</span>';
+  h+='</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body"><div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+fmt(c.value)+'</div><div class="kl">Value</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:'+(c.chance!=null?(c.chance>=.5?'var(--gn)':'var(--am)'):'var(--txM)')+'">'+(chV?chV+'%':'\u2014')+'</div><div class="kl">Probability</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--acL)">'+fmt(wv)+'</div><div class="kl">Expected</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--txD)">'+c.dso+'d</div><div class="kl">DSO</div></div></div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Client</label><input id="mc-cl" value="'+(c.client||'')+'"></div>';
+  h+='<div class="mf"><label>Country</label><input id="mc-co" value="'+(c.country||'')+'"></div>';
+  h+='<div class="mf"><label>Industry</label><select id="mc-in"><option'+(c.industry==='Government'?' selected':'')+'>Government</option><option'+(c.industry==='Enterprise'?' selected':'')+'>Enterprise</option><option'+(c.industry==='Academy'?' selected':'')+'>Academy</option></select></div>';
+  h+='<div class="mf"><label>Value (USD)</label><input id="mc-va" type="number" value="'+c.value+'"></div>';
+  h+='<div class="mf"><label>DSO (days)</label><input id="mc-ds" type="number" value="'+c.dso+'"></div>';
+  h+='<div class="mf"><label>Probability %</label><input id="mc-ch" type="number" value="'+chV+'" min="0" max="100"></div>';
+  h+='<div class="mf"><label>Signing Date</label><input id="mc-sd" type="date" value="'+(c.signingDate||'')+'"></div>';
+  h+='<div class="mf"><label>Monthly</label><select id="mc-mo"><option value="false"'+(!c.monthly?' selected':'')+'>No</option><option value="true"'+(c.monthly?' selected':'')+'>Yes</option></select></div>';
+  h+='</div><div class="modal-sep"></div>';
+  h+='<div class="mf"><label>Payment Month (auto)</label><div class="mono" style="color:var(--txD);font-size:13px;padding:8px 0">'+(c.pm||'\u2014')+'</div></div>';
+  h+='</div><div class="modal-foot"><button class="btn-d" id="mcDel">Delete</button><button class="btn-ghost" id="mcX">Cancel</button><button class="btn-p" id="mcSave">Save Changes</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('mcX').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
+  document.getElementById('mcDel').addEventListener('click',function(){if(!confirm('Delete "'+c.client+'"?'))return;fetch('/api/contracts/'+c.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted!');loadAll().then(renderAll)}})});
+  document.getElementById('mcSave').addEventListener('click',function(){var ch=document.getElementById('mc-ch').value;fetch('/api/contracts/'+c.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client:document.getElementById('mc-cl').value,country:document.getElementById('mc-co').value,industry:document.getElementById('mc-in').value,value:parseFloat(document.getElementById('mc-va').value),dso:parseInt(document.getElementById('mc-ds').value),chance:ch!==''?parseFloat(ch)/100:null,monthly:document.getElementById('mc-mo').value==='true'})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated!');loadAll().then(renderAll)}})});
+}
+
+function openEmployeeCard(e){
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+e.name+' <span class="mtag" style="background:var(--ac)18;color:var(--ac)">'+e.dept+'</span></h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body"><div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+fmt(e.gross)+'</div><div class="kl">Gross</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--gn)">'+fmt(e.laborCost)+'</div><div class="kl">Labor (x1.35)</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--am)">'+fmt(e.laborCost*12)+'</div><div class="kl">Annual</div></div></div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Name</label><input id="me-nm" value="'+e.name+'"></div>';
+  h+='<div class="mf"><label>Department</label><select id="me-dp"><option'+(e.dept==='R&D'?' selected':'')+'>R&D</option><option'+(e.dept==='S&M'?' selected':'')+'>S&M</option><option'+(e.dept==='G&A'?' selected':'')+'>G&A</option><option'+(e.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='<div class="mf"><label>Monthly Gross</label><input id="me-gr" type="number" value="'+e.gross+'"></div>';
+  h+='<div class="mf"><label>Termination Date</label><input id="me-td" type="date" value="'+(e.termDate||'')+'"><div class="hint">Empty = active</div></div>';
+  h+='</div></div><div class="modal-foot"><button class="btn-d" id="meDel">Delete</button><button class="btn-ghost" id="meX">Cancel</button><button class="btn-p" id="meSave">Save</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);document.getElementById('meX').addEventListener('click',closeModal);document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+  document.getElementById('meDel').addEventListener('click',function(){if(!confirm('Delete?'))return;fetch('/api/employees/'+e.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted!');loadAll().then(renderAll)}})});
+  document.getElementById('meSave').addEventListener('click',function(){fetch('/api/employees/'+e.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('me-nm').value,department:document.getElementById('me-dp').value,gross:parseFloat(document.getElementById('me-gr').value),termDate:document.getElementById('me-td').value||null})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated!');loadAll().then(renderAll)}})});
+}
+
+function openExpenseCard(x){
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+x.vendor+' <span class="mtag" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span>';
+  if(x.isCogs)h+=' <span class="cogs-badge">COGS</span>';
+  h+='</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body"><div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+fmt(x.amount)+'</div><div class="kl">Monthly</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--am)">'+fmt(x.amount*12)+'</div><div class="kl">Annual</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:'+(x.isCogs?'var(--am)':'var(--pu)')+'">'+(x.isCogs?'COGS':'OpEx')+'</div><div class="kl">Type</div></div></div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Vendor</label><input id="mx-vn" value="'+x.vendor+'"></div>';
+  h+='<div class="mf"><label>Department</label><select id="mx-dp"><option'+(x.dept==='R&D'?' selected':'')+'>R&D</option><option'+(x.dept==='S&M'?' selected':'')+'>S&M</option><option'+(x.dept==='G&A'?' selected':'')+'>G&A</option><option'+(x.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='<div class="mf"><label>Monthly (USD)</label><input id="mx-am" type="number" value="'+x.amount+'"></div>';
+  h+='<div class="mf"><label>COGS?</label><select id="mx-cg"><option value="false"'+(!x.isCogs?' selected':'')+'>No - OpEx</option><option value="true"'+(x.isCogs?' selected':'')+'>Yes - COGS</option></select></div>';
+  h+='</div></div><div class="modal-foot"><button class="btn-d" id="mxDel">Delete</button><button class="btn-ghost" id="mxX">Cancel</button><button class="btn-p" id="mxSave">Save</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);document.getElementById('mxX').addEventListener('click',closeModal);document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+  document.getElementById('mxDel').addEventListener('click',function(){if(!confirm('Delete?'))return;fetch('/api/expenses/'+x.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Deleted!');loadAll().then(renderAll)}})});
+  document.getElementById('mxSave').addEventListener('click',function(){fetch('/api/expenses/'+x.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vendor:document.getElementById('mx-vn').value,department:document.getElementById('mx-dp').value,monthlyAmount:parseFloat(document.getElementById('mx-am').value),isCogs:document.getElementById('mx-cg').value==='true'})}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated!');loadAll().then(renderAll)}})});
+}
+
+// ══════════════════════════════════════════
+function renderAll(){renderHeader();renderFinancial();renderSales();renderExpenses();renderPipeline();renderScenario();renderSettings()}
+function init(){loadAll().then(renderAll)}
+</script>
+</body>
+</html>
