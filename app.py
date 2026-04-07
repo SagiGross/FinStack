@@ -13,7 +13,7 @@ from typing import Optional
 from uuid import uuid4
 
 import jwt
-from fastapi import FastAPI, Query, Header, HTTPException, Depends
+from fastapi import FastAPI, Query, Header, HTTPException, Depends, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -106,6 +106,13 @@ def init_db():
             notes TEXT DEFAULT '',
             created_at TEXT,
             FOREIGN KEY (expense_id) REFERENCES expenses(id)
+        );
+        CREATE TABLE IF NOT EXISTS bank_balances (
+            month TEXT PRIMARY KEY,
+            opening_balance REAL,
+            closing_balance REAL,
+            is_manual INTEGER DEFAULT 0,
+            notes TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT, entity_id TEXT,
@@ -377,7 +384,7 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
     data=[]
     for mi,ml in enumerate(ML):
         p=ml.split("-"); md=date(int(p[1]),int(p[0]),1)
-        lab={"R&D":0,"S&M":0,"G&A":0,"Training":0}
+        lab={"R&D":0,"S&M":0,"G&A":0,"Training":0,"Finance":0}
         for e in employees:
             h=date.fromisoformat(e["hire_date"]); t=date.fromisoformat(e["term_date"]) if e["term_date"] else None
             if md>=h and (not t or md<=t):
@@ -385,7 +392,7 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
                 bonus=e.get("bonus",0)
                 raw=(e["gross"]+bonus)*ECF*pct
                 lab[e["dept"]]+=to_usd(raw, e.get("currency","ILS"), ml)
-        vd={"R&D":0,"S&M":0,"G&A":0,"Training":0}; vc=vo=0
+        vd={"R&D":0,"S&M":0,"G&A":0,"Training":0,"Finance":0}; vc=vo=0
         for x in expenses:
             a=to_usd(x["amounts"].get(ml,0), x.get("currency","ILS"), ml)
             vd[x["dept"]]+=a
@@ -885,6 +892,132 @@ def del_invoice(iid: str, user=Depends(require_admin)):
     with get_db() as db:
         db.execute("DELETE FROM invoices WHERE id=?", (iid,))
     return {"ok": True}
+
+# ══════════════════════════════════════════
+# CASHFLOW REPORT
+# ══════════════════════════════════════════
+@app.get("/api/cashflow-report")
+def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
+    """Monthly cashflow report with auto-calculated + manual override balances."""
+    summary = compute(0, 0, 15000, True)
+    rate = get_exchange_rate()
+    
+    # Load manual bank balances
+    with get_db() as db:
+        bal_rows = db.execute("SELECT * FROM bank_balances ORDER BY month").fetchall()
+    manual_balances = {r["month"]: dict(r) for r in bal_rows}
+    
+    now = datetime.now()
+    current_month_str = f"{now.month:02d}-{now.year}"
+    
+    months = []
+    prev_closing = 0
+    
+    for i, s in enumerate(summary):
+        ml = ML[i]
+        is_past = ml < current_month_str
+        is_current = ml == current_month_str
+        
+        # Revenue (cash in from contracts)
+        revenue = s["cashIn"]
+        # Expenses: labor + vendor
+        labor_total = sum(s["lab"].values())
+        vendor_total = sum(s["vd"].values())
+        total_expenses = labor_total + vendor_total
+        
+        # Net cashflow
+        net = revenue - total_expenses
+        
+        # Auto-calculated balances
+        auto_opening = prev_closing
+        auto_closing = auto_opening + net
+        
+        # Check for manual overrides
+        manual = manual_balances.get(ml, {})
+        has_manual = manual.get("is_manual", 0)
+        
+        opening = manual.get("opening_balance") if (has_manual and manual.get("opening_balance") is not None) else auto_opening
+        closing = manual.get("closing_balance") if (has_manual and manual.get("closing_balance") is not None) else (opening + net)
+        
+        # Currency conversion
+        conv = (1.0 / rate) if currency == "ILS" else 1.0  # if ILS: multiply USD by rate
+        if currency == "ILS":
+            conv = rate  # $1 = ₪rate, so multiply by rate
+        
+        month_data = {
+            "month": ml,
+            "monthLabel": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][i],
+            "isPast": is_past,
+            "isCurrent": is_current,
+            "isForecast": not is_past and not is_current,
+            "openingBalance": round(opening * conv, 2),
+            "revenue": round(revenue * conv, 2),
+            "laborCost": round(labor_total * conv, 2),
+            "vendorExpenses": round(vendor_total * conv, 2),
+            "totalExpenses": round(total_expenses * conv, 2),
+            "netCashflow": round(net * conv, 2),
+            "closingBalance": round(closing * conv, 2),
+            "isManual": bool(has_manual),
+            "notes": manual.get("notes", ""),
+            # Raw USD values for reference
+            "openingBalanceUsd": round(opening, 2),
+            "closingBalanceUsd": round(closing, 2),
+        }
+        months.append(month_data)
+        prev_closing = closing  # USD for next month calc
+    
+    return {
+        "months": months,
+        "currency": currency,
+        "exchangeRate": rate,
+        "currentMonth": current_month_str
+    }
+
+class BalanceUpdate(BaseModel):
+    month: str
+    openingBalance: Optional[float] = None
+    closingBalance: Optional[float] = None
+    notes: str = ""
+
+@app.put("/api/cashflow-report/balance")
+def update_balance(b: BalanceUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        existing = db.execute("SELECT * FROM bank_balances WHERE month=?", (b.month,)).fetchone()
+        if existing:
+            fields = ["is_manual=1"]
+            vals = []
+            if b.openingBalance is not None:
+                fields.append("opening_balance=?"); vals.append(b.openingBalance)
+            if b.closingBalance is not None:
+                fields.append("closing_balance=?"); vals.append(b.closingBalance)
+            if b.notes:
+                fields.append("notes=?"); vals.append(b.notes)
+            vals.append(b.month)
+            db.execute(f"UPDATE bank_balances SET {','.join(fields)} WHERE month=?", vals)
+        else:
+            db.execute("INSERT INTO bank_balances (month, opening_balance, closing_balance, is_manual, notes) VALUES (?,?,?,1,?)",
+                       (b.month, b.openingBalance, b.closingBalance, b.notes))
+    return {"ok": True}
+
+@app.post("/api/cashflow-report/upload")
+async def upload_bank_statement(file: UploadFile, user=Depends(require_admin)):
+    """Parse bank Excel file and extract monthly opening/closing balances."""
+    import io
+    try:
+        import openpyxl
+    except:
+        return {"ok": False, "error": "openpyxl not installed"}
+    
+    data = await file.read()
+    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+    ws = wb.active
+    
+    # Try to find date and balance columns
+    results = []
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True):
+        results.append([str(c) if c else "" for c in row])
+    
+    return {"ok": True, "rows": len(results), "preview": results[:10], "columns": results[0] if results else []}
 
 # ══════════════════════════════════════════
 # Serve

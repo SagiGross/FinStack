@@ -288,10 +288,10 @@ function renderHeader(){
 // ADMIN DASHBOARD (Financial + Sales + Expenses tabs)
 // ══════════════════════════════════════════
 function renderAdminDashboard(el){
-  var h='<div class="subtabs" id="adTabs"><button class="stab act" data-st="fin">Financial</button><button class="stab" data-st="sal">Sales Summaries</button><button class="stab" data-st="exp">Expenses</button><button class="stab" data-st="map">Sales Map</button><button class="stab" data-st="scen">What-If</button></div>';
-  h+='<div class="stab-content act" id="st-fin"></div><div class="stab-content" id="st-sal"></div><div class="stab-content" id="st-exp"></div><div class="stab-content" id="st-map"></div><div class="stab-content" id="st-scen"></div>';
+  var h='<div class="subtabs" id="adTabs"><button class="stab act" data-st="fin">Financial</button><button class="stab" data-st="sal">Sales Summaries</button><button class="stab" data-st="exp">Expenses</button><button class="stab" data-st="cf">Cash Flow</button><button class="stab" data-st="map">Sales Map</button><button class="stab" data-st="scen">What-If</button></div>';
+  h+='<div class="stab-content act" id="st-fin"></div><div class="stab-content" id="st-sal"></div><div class="stab-content" id="st-exp"></div><div class="stab-content" id="st-cf"></div><div class="stab-content" id="st-map"></div><div class="stab-content" id="st-scen"></div>';
   el.innerHTML=h;
-  document.getElementById('adTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#adTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='map'){renderSalesMap(document.getElementById('st-map'))}setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
+  document.getElementById('adTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#adTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='map'){renderSalesMap(document.getElementById('st-map'))}if(b.dataset.st==='cf'){renderCashFlow(document.getElementById('st-cf'))}setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
   renderFinancial();renderSalesSummary();renderExpensesTab();renderScenario();
 }
 
@@ -405,11 +405,11 @@ function renderSalesSummary(){
 
 
 function renderExpensesTab(){
-  var d=D.summary,an={"R&D":0,"S&M":0,"G&A":0,"Training":0},depts=["R&D","S&M","G&A","Training"];
+  var d=D.summary,an={"R&D":0,"S&M":0,"G&A":0,"Training":0},depts=["R&D","S&M","G&A","Training","Finance"];
   d.forEach(function(m){depts.forEach(function(k){an[k]+=(m.lab[k]||0)+(m.vd[k]||0)})});
   var totalOpex=d.reduce(function(s,m){return s+m.opex},0);
   var totalCogs=d.reduce(function(s,m){return s+m.cogs},0);
-  var h='<div class="kg kg4">';depts.forEach(function(dept,i){h+=kpi(['\u2692','\u263A','\u2302','\u2709'][i],dept,fmt(an[dept]),'Annual',['var(--ac)','var(--pk)','var(--tl)','var(--am)'][i],i*50)});h+='</div>';
+  var h='<div class="kg kg4">';depts.forEach(function(dept,i){h+=kpi(['\u2692','\u263A','\u2302','\u2709','\u2696'][i],dept,fmt(an[dept]),'Annual',['var(--ac)','var(--pk)','var(--tl)','var(--am)','var(--cy)'][i],i*50)});h+='</div>';
   var expExpanded=false;
   h+='<div class="cg cg2">';
   h+='<div class="cc"><div class="cc-t" style="justify-content:space-between">Expenses by Department <div><button class="btn-ghost" id="btnDeptMode" style="padding:3px 10px;font-size:10px;margin-right:4px">Grouped</button><button class="btn-ghost" id="btnDeptSide" style="padding:3px 10px;font-size:10px">Side by Side</button></div></div><div style="height:280px"><canvas id="chDept"></canvas></div></div>';
@@ -746,6 +746,126 @@ function renderSalesDashContent(el){
 // ══════════════════════════════════════════
 // SETTINGS (admin only)
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+// CASH FLOW REPORT
+// ══════════════════════════════════════════
+var cfCurrency='USD';
+function renderCashFlow(el){
+  el.innerHTML='<div style="padding:40px;text-align:center;color:var(--txM)">Loading...</div>';
+  authFetch('/api/cashflow-report?currency='+cfCurrency).then(function(r){return r.json()}).then(function(data){
+    var months=data.months;var rate=data.exchangeRate;
+    var sym=cfCurrency==='ILS'?'\u20AA':cfCurrency==='EUR'?'\u20AC':'$';
+    var fmtCF=function(n){if(n==null)return'\u2014';var a=Math.abs(n);var s=n<0?'-':'';if(a>=1e6)return s+sym+(a/1e6).toFixed(2)+'M';if(a>=1e3)return s+sym+(a/1e3).toFixed(1)+'K';return s+sym+a.toFixed(0)};
+
+    // KPIs
+    var totalRev=months.reduce(function(s,m){return s+m.revenue},0);
+    var totalExp=months.reduce(function(s,m){return s+m.totalExpenses},0);
+    var endBal=months[months.length-1].closingBalance;
+    var netTotal=totalRev-totalExp;
+
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+    h+='<h2 style="margin:0">Cash Flow Report FY2026</h2>';
+    h+='<div style="display:flex;gap:6px">';
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$ USD</button>';
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">₪ ILS</button>';
+    h+='<button class="btn-ghost" id="cfUpload" style="padding:6px 14px;font-size:11px">\u2191 Upload Bank Statement</button>';
+    h+='</div></div>';
+
+    h+='<div class="kg kg4" style="margin-bottom:16px">';
+    h+=kpi('\u2197','Total Revenue',fmtCF(totalRev),'FY2026','var(--gn)');
+    h+=kpi('\u2198','Total Expenses',fmtCF(totalExp),'FY2026','var(--rd)',50);
+    h+=kpi('\u2248','Net Cashflow',fmtCF(netTotal),'FY2026',netTotal>=0?'var(--gn)':'var(--rd)',100);
+    h+=kpi('\u2587','End Balance',fmtCF(endBal),'Dec 2026',endBal>=0?'var(--ac)':'var(--rd)',150);
+    h+='</div>';
+
+    // Chart
+    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Monthly Cash Flow</div><div style="height:260px"><canvas id="chCF"></canvas></div></div>';
+
+    // Table
+    h+='<div style="overflow-x:auto"><table style="width:100%;min-width:900px"><thead><tr style="font-size:11px">';
+    h+='<th>Month</th><th>Opening</th><th style="color:var(--gn)">Revenue</th><th style="color:var(--am)">Labor</th><th style="color:var(--pu)">Vendors</th><th style="color:var(--rd)">Total Exp.</th><th>Net</th><th>Closing</th><th>Status</th><th></th>';
+    h+='</tr></thead><tbody id="cfTbl">';
+
+    months.forEach(function(m){
+      var rowBg=m.isPast?'':'';
+      var statusPill=m.isPast?'<span class="pill" style="background:var(--gn)18;color:var(--gn)">Actual</span>':m.isCurrent?'<span class="pill" style="background:var(--am)18;color:var(--am)">Current</span>':'<span class="pill" style="background:var(--txM)18;color:var(--txM)">Forecast</span>';
+      h+='<tr style="'+rowBg+'">';
+      h+='<td style="font-weight:700">'+m.monthLabel+'</td>';
+      h+='<td class="mono cf-bal-cell" data-month="'+m.month+'" data-field="opening" style="cursor:pointer;'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.openingBalance)+(m.isManual?' \u270E':'')+'</td>';
+      h+='<td class="mono" style="color:var(--gn)">'+fmtCF(m.revenue)+'</td>';
+      h+='<td class="mono" style="color:var(--am)">'+fmtCF(m.laborCost)+'</td>';
+      h+='<td class="mono" style="color:var(--pu)">'+fmtCF(m.vendorExpenses)+'</td>';
+      h+='<td class="mono" style="color:var(--rd);font-weight:700">'+fmtCF(m.totalExpenses)+'</td>';
+      h+='<td class="mono" style="font-weight:700;color:'+(m.netCashflow>=0?'var(--gn)':'var(--rd)')+'">'+fmtCF(m.netCashflow)+'</td>';
+      h+='<td class="mono cf-bal-cell" data-month="'+m.month+'" data-field="closing" style="cursor:pointer;font-weight:700;'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.closingBalance)+(m.isManual?' \u270E':'')+'</td>';
+      h+='<td>'+statusPill+'</td>';
+      h+='<td>'+(m.notes?'<span title="'+m.notes+'" style="cursor:help;color:var(--txM)">\u{1F4DD}</span>':'')+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Click Opening/Closing to edit manually. Rate: $1 = \u20AA'+rate.toFixed(2)+'. <span style="color:var(--cy)">\u270E = Manual override</span></div>';
+
+    el.innerHTML=h;
+
+    // Chart
+    mk('chCF',{type:'bar',data:{labels:months.map(function(m){return m.monthLabel}),datasets:[
+      {label:'Revenue',data:months.map(function(m){return m.revenue}),backgroundColor:'#10b981aa',borderRadius:4},
+      {label:'Expenses',data:months.map(function(m){return-m.totalExpenses}),backgroundColor:'#ef444488',borderRadius:4},
+      {label:'Balance',data:months.map(function(m){return m.closingBalance}),type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4,order:0}
+    ]}});
+
+    // Currency toggle
+    document.querySelectorAll('.cf-cur').forEach(function(btn){
+      btn.addEventListener('click',function(){cfCurrency=this.dataset.cur;renderCashFlow(el)});
+    });
+
+    // Click to edit balance
+    document.querySelectorAll('.cf-bal-cell').forEach(function(cell){
+      cell.addEventListener('click',function(){
+        var month=this.dataset.month;var field=this.dataset.field;
+        var currentVal=this.textContent.replace(/[^0-9.\-]/g,'');
+        var newVal=prompt((field==='opening'?'Opening':'Closing')+' balance for '+month+' (in USD):',currentVal);
+        if(newVal===null)return;
+        var num=parseFloat(newVal);if(isNaN(num))return;
+        var body={month:month};
+        if(field==='opening')body.openingBalance=num;else body.closingBalance=num;
+        authFetch('/api/cashflow-report/balance',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+          .then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Balance updated');renderCashFlow(el)}});
+      });
+    });
+
+    // Upload handler
+    document.getElementById('cfUpload').addEventListener('click',function(){
+      var inp=document.createElement('input');inp.type='file';inp.accept='.xlsx,.xls,.csv';
+      inp.onchange=function(){
+        if(!inp.files[0])return;
+        var fd=new FormData();fd.append('file',inp.files[0]);
+        authFetch('/api/cashflow-report/upload',{method:'POST',body:fd})
+          .then(function(r){return r.json()}).then(function(res){
+            if(res.ok){
+              toast('File parsed: '+res.rows+' rows');
+              // Show preview modal
+              var ph='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:700px"><div class="modal-head"><h2>Bank Statement Preview</h2><button class="modal-close" id="modalClose">\u2715</button></div><div class="modal-body">';
+              ph+='<div style="font-size:12px;color:var(--txM);margin-bottom:12px">'+res.rows+' rows found. Columns: '+res.columns.join(', ')+'</div>';
+              ph+='<div style="overflow-x:auto;max-height:300px"><table><thead><tr>';
+              if(res.preview[0])res.preview[0].forEach(function(c){ph+='<th style="font-size:10px">'+c+'</th>'});
+              ph+='</tr></thead><tbody>';
+              res.preview.slice(1).forEach(function(row){ph+='<tr>';row.forEach(function(c){ph+='<td style="font-size:11px">'+c+'</td>'});ph+='</tr>'});
+              ph+='</tbody></table></div>';
+              ph+='<div style="margin-top:12px;font-size:11px;color:var(--txM)">Review the data above. Manual balance updates can be made by clicking cells in the Cash Flow table.</div>';
+              ph+='</div><div class="modal-foot"><button class="btn-ghost" id="mcX">Close</button></div></div></div>';
+              document.body.insertAdjacentHTML('beforeend',ph);
+              document.getElementById('modalClose').addEventListener('click',closeModal);
+              document.getElementById('mcX').addEventListener('click',closeModal);
+              document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
+            } else {toast('Error: '+(res.error||'Unknown'))}
+          });
+      };
+      inp.click();
+    });
+  });
+}
+
 // ══════════════════════════════════════════
 // SALES MAP (admin only)
 // ══════════════════════════════════════════
@@ -1154,7 +1274,7 @@ function renderPayments(el){
     nvHtml+='<div class="modal-head"><h2>New Vendor</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
     nvHtml+='<div class="modal-body"><div class="modal-grid">';
     nvHtml+='<div class="mf"><label>Vendor Name *</label><input id="nv-name" placeholder="e.g. AWS"></div>';
-    nvHtml+='<div class="mf"><label>Department</label><select id="nv-dept"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    nvHtml+='<div class="mf"><label>Department</label><select id="nv-dept"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option><option>Finance</option></select></div>';
     nvHtml+='<div class="mf"><label>Monthly Amount</label><input id="nv-amt" type="number" placeholder="0"></div>';
     nvHtml+='<div class="mf"><label>COGS?</label><select id="nv-cogs"><option value="false">No - OpEx</option><option value="true">Yes - COGS</option></select></div>';
     nvHtml+='</div></div>';
@@ -1299,7 +1419,7 @@ function renderSettings(el){
     ah+='<div class="modal-head"><h2>New Employee</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
     ah+='<div class="modal-body"><div class="modal-grid">';
     ah+='<div class="mf"><label>Full Name *</label><input id="ae-nm" placeholder="John Doe"></div>';
-    ah+='<div class="mf"><label>Department</label><select id="ae-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    ah+='<div class="mf"><label>Department</label><select id="ae-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option><option>Finance</option></select></div>';
     ah+='<div class="mf"><label>Gross Salary</label><input id="ae-gr" type="number" placeholder="15000"></div>';
     ah+='<div class="mf"><label>Currency</label><select id="ae-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
     ah+='<div class="mf"><label>Position %</label><input id="ae-pp" type="number" value="100" min="0" max="100"></div>';
@@ -1329,7 +1449,7 @@ function renderSettings(el){
     ah+='<div class="modal-head"><h2>New Vendor / Expense</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
     ah+='<div class="modal-body"><div class="modal-grid">';
     ah+='<div class="mf"><label>Vendor Name *</label><input id="ax-vn" placeholder="e.g. AWS"></div>';
-    ah+='<div class="mf"><label>Department</label><select id="ax-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    ah+='<div class="mf"><label>Department</label><select id="ax-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option><option>Finance</option></select></div>';
     ah+='<div class="mf"><label>Monthly Amount</label><input id="ax-am" type="number" placeholder="5000"></div>';
     ah+='<div class="mf"><label>Currency</label><select id="ax-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
     ah+='<div class="mf"><label>Service Description</label><input id="ax-sd" placeholder="Cloud hosting"></div>';
@@ -1718,7 +1838,7 @@ function openExpenseCard(x){
   h+='<option'+(x.dept==='R&D'?' selected':'')+'>R&D</option>';
   h+='<option'+(x.dept==='S&M'?' selected':'')+'>S&M</option>';
   h+='<option'+(x.dept==='G&A'?' selected':'')+'>G&A</option>';
-  h+='<option'+(x.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='<option'+(x.dept==='Training'?' selected':'')+'>Training</option><option'+(x.dept==='Finance'?' selected':'')+'>Finance</option></select></div>';
   h+='</div>';
   h+='<div class="modal-sep"></div>';
   h+='<div class="section-label">Cost</div>';
@@ -1796,7 +1916,7 @@ function openEmployeeCard(e){
   h+='<option'+(e.dept==='R&D'?' selected':'')+'>R&D</option>';
   h+='<option'+(e.dept==='S&M'?' selected':'')+'>S&M</option>';
   h+='<option'+(e.dept==='G&A'?' selected':'')+'>G&A</option>';
-  h+='<option'+(e.dept==='Training'?' selected':'')+'>Training</option></select></div>';
+  h+='<option'+(e.dept==='Training'?' selected':'')+'>Training</option><option'+(x.dept==='Finance'?' selected':'')+'>Finance</option></select></div>';
   h+='<div class="mf"><label>Currency</label><select id="me-cur">';
   h+='<option value="ILS"'+(cur==='ILS'?' selected':'')+'>\u20AA ILS (Shekel)</option>';
   h+='<option value="USD"'+(cur==='USD'?' selected':'')+'>$ USD (Dollar)</option><option value="EUR"'+(cur==='EUR'?' selected':'')+'>€ EUR (Euro)</option>';
