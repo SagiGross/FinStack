@@ -604,13 +604,85 @@ function renderSalesPipeline(el){
 
 // Sales Dashboard (for sales role)
 function renderSalesDash(el){
+  var h='<div class="subtabs" id="sdTabs"><button class="stab act" data-st="sdash">Dashboard</button><button class="stab" data-st="smap">Sales Map</button></div>';
+  h+='<div class="stab-content act" id="st-sdash"></div><div class="stab-content" id="st-smap"></div>';
+  el.innerHTML=h;
+  document.getElementById('sdTabs').addEventListener('click',function(e){
+    var b=e.target.closest('.stab');if(!b)return;
+    document.querySelectorAll('#sdTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');
+    el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});
+    document.getElementById('st-'+b.dataset.st).classList.add('act');
+    if(b.dataset.st==='smap'){renderSalesMapFiltered(document.getElementById('st-smap'))}
+  });
+  renderSalesDashContent(document.getElementById('st-sdash'));
+}
+
+function renderSalesMapFiltered(mapEl){
+  var allCons=D.contracts||[];
+  var cons;
+  if(USER.role==='sales_manager'){cons=allCons}
+  else if(USER.role==='sales'){cons=USER.canSeeAll?allCons:allCons.filter(function(c){return c.salespersonId===USER.id})}
+  else{cons=allCons}
+
+  var countryData={};
+  cons.forEach(function(c){
+    var co=c.country||'Unknown';
+    if(!countryData[co])countryData[co]={signed:0,pipeline:0,deals:0,clients:[],industries:[],contracts:[]};
+    countryData[co].deals++;
+    if(c.stage==='Signed')countryData[co].signed+=c.value;
+    else countryData[co].pipeline+=c.weighted;
+    if(countryData[co].clients.indexOf(c.client)===-1)countryData[co].clients.push(c.client);
+    if(countryData[co].industries.indexOf(c.industry)===-1)countryData[co].industries.push(c.industry);
+    countryData[co].contracts.push(c);
+  });
+
+  var nameToIso={"Afghanistan":"AF","Albania":"AL","Algeria":"DZ","Argentina":"AR","Australia":"AU","Austria":"AT","Belgium":"BE","Brazil":"BR","Bulgaria":"BG","Cambodia":"KH","Cameroon":"CM","Canada":"CA","Chile":"CL","China":"CN","Colombia":"CO","Croatia":"HR","Cyprus":"CY","Denmark":"DK","Egypt":"EG","Estonia":"EE","Finland":"FI","France":"FR","Gabon":"GA","Georgia":"GE","Germany":"DE","Ghana":"GH","Greece":"GR","Hungary":"HU","India":"IN","Indonesia":"ID","Iran":"IR","Iraq":"IQ","Ireland":"IE","Israel":"IL","Italy":"IT","Ivory Coast":"CI","Japan":"JP","Jordan":"JO","Kazakhstan":"KZ","Kenya":"KE","Kosovo":"XK","Kuwait":"KW","Latvia":"LV","Lebanon":"LB","Lithuania":"LT","Malaysia":"MY","Mexico":"MX","Morocco":"MA","Netherlands":"NL","New Zealand":"NZ","Nigeria":"NG","Norway":"NO","Oman":"OM","Pakistan":"PK","Peru":"PE","Philippines":"PH","Poland":"PL","Portugal":"PT","Qatar":"QA","Romania":"RO","Russia":"RU","Saudi Arabia":"SA","Senegal":"SN","Serbia":"RS","Singapore":"SG","South Africa":"ZA","South Korea":"KR","Spain":"ES","Sweden":"SE","Switzerland":"CH","Taiwan":"TW","Tanzania":"TZ","Thailand":"TH","Tunisia":"TN","Turkey":"TR","UAE":"AE","Uganda":"UG","Ukraine":"UA","United Kingdom":"GB","United States":"US","Venezuela":"VE","Vietnam":"VN","Zambia":"ZM","Zimbabwe":"ZW","Palestine":"PS"};
+  var coords={"AF":{lat:33,lng:65},"AL":{lat:41,lng:20},"DZ":{lat:28,lng:3},"AR":{lat:-34,lng:-64},"AU":{lat:-25,lng:134},"AT":{lat:47.5,lng:14},"BE":{lat:50.8,lng:4.4},"BR":{lat:-14,lng:-51},"BG":{lat:43,lng:25},"KH":{lat:12.5,lng:105},"CM":{lat:6,lng:12},"CA":{lat:56,lng:-106},"CL":{lat:-35,lng:-71},"CN":{lat:35,lng:105},"CO":{lat:4,lng:-72},"HR":{lat:45.2,lng:15.5},"CY":{lat:35,lng:33},"DK":{lat:56,lng:10},"EG":{lat:27,lng:30},"EE":{lat:59,lng:26},"FI":{lat:64,lng:26},"FR":{lat:46,lng:2},"GA":{lat:-1,lng:11.6},"GE":{lat:42,lng:44},"DE":{lat:51,lng:10},"GH":{lat:8,lng:-1.2},"GR":{lat:39,lng:22},"HU":{lat:47,lng:20},"IN":{lat:21,lng:78},"ID":{lat:-5,lng:120},"IR":{lat:32,lng:53},"IQ":{lat:33,lng:44},"IE":{lat:53,lng:-8},"IL":{lat:31.5,lng:35},"IT":{lat:42.8,lng:12.6},"CI":{lat:7.5,lng:-5.5},"JP":{lat:36,lng:138},"JO":{lat:31,lng:36.5},"KZ":{lat:48,lng:67},"KE":{lat:-1,lng:38},"XK":{lat:42.6,lng:21},"KW":{lat:29.3,lng:47.6},"LV":{lat:57,lng:25},"LB":{lat:34,lng:36},"LT":{lat:56,lng:24},"MY":{lat:4,lng:108},"MX":{lat:23,lng:-102},"MA":{lat:32,lng:-5},"NL":{lat:52.5,lng:5.7},"NZ":{lat:-41,lng:174},"NG":{lat:10,lng:8},"NO":{lat:62,lng:10},"OM":{lat:21,lng:57},"PK":{lat:30,lng:69},"PE":{lat:-10,lng:-76},"PH":{lat:13,lng:122},"PL":{lat:52,lng:20},"PT":{lat:39.4,lng:-8},"QA":{lat:25.3,lng:51.2},"RO":{lat:46,lng:25},"RU":{lat:62,lng:105},"SA":{lat:24,lng:45},"SN":{lat:14,lng:-14.5},"RS":{lat:44,lng:21},"SG":{lat:1.35,lng:104},"ZA":{lat:-30,lng:25},"KR":{lat:36,lng:128},"ES":{lat:40,lng:-4},"SE":{lat:62,lng:15},"CH":{lat:47,lng:8.2},"TW":{lat:23.7,lng:121},"TZ":{lat:-6.4,lng:35},"TH":{lat:15,lng:100},"TN":{lat:34,lng:9},"TR":{lat:39,lng:35},"AE":{lat:24,lng:54},"UG":{lat:1,lng:32},"UA":{lat:49,lng:32},"GB":{lat:54,lng:-2},"US":{lat:40,lng:-100},"VE":{lat:7,lng:-66},"VN":{lat:16,lng:106},"ZM":{lat:-15,lng:28},"ZW":{lat:-20,lng:30},"PS":{lat:32,lng:35.3}};
+
+  mapEl.innerHTML='<div id="amMapRoot2" style="width:100%;height:520px;border-radius:16px;overflow:hidden;background:linear-gradient(145deg,#080c18 0%,#0f172a 40%,#0c1222 100%)"></div>';
+
+  function doBuild2(){
+    try{
+      if(window._amRoot2){try{window._amRoot2.dispose()}catch(e){}}
+      var root=am5.Root.new("amMapRoot2");window._amRoot2=root;
+      root.setThemes([am5themes_Animated.new(root)]);
+      var chart=root.container.children.push(am5map.MapChart.new(root,{panX:"rotateX",panY:"translateY",projection:am5map.geoNaturalEarth1(),homeZoomLevel:1.05,homeGeoPoint:{longitude:25,latitude:15},wheelY:"zoom"}));
+      var ps=chart.series.push(am5map.MapPolygonSeries.new(root,{geoJSON:am5geodata_worldLow,exclude:["AQ"]}));
+      ps.mapPolygons.template.setAll({fill:am5.color("#1a2236"),stroke:am5.color("#0d1117"),strokeWidth:0.4,fillOpacity:0.85,interactive:true});
+      ps.mapPolygons.template.states.create("hover",{fill:am5.color("#334155"),fillOpacity:1,stroke:am5.color("#94a3b8"),strokeWidth:1.2});
+      ps.mapPolygons.template.adapters.add("fill",function(f,t){var id=t.dataItem.get("id");var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});if(nm&&countryData[nm]){return countryData[nm].signed>0?am5.color("#10b981"):am5.color("#2563eb")}return f});
+      ps.mapPolygons.template.adapters.add("fillOpacity",function(o,t){var id=t.dataItem.get("id");var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});return(nm&&countryData[nm])?1:0.5});
+      var ttip=am5.Tooltip.new(root,{getFillFromSprite:false,getLabelFillFromSprite:false,autoTextColor:false,paddingLeft:0,paddingRight:0,paddingTop:0,paddingBottom:0});
+      ttip.get("background").setAll({fill:am5.color("#00000000"),strokeWidth:0});
+      ps.mapPolygons.template.set("tooltip",ttip);
+      ps.mapPolygons.template.adapters.add("tooltipHTML",function(h,t){var id=t.dataItem.get("id");var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});if(!nm||!countryData[nm])return"";var d=countryData[nm];return '<div style="background:rgba(15,23,42,0.95);backdrop-filter:blur(12px);border:1px solid rgba(100,116,139,0.3);border-radius:12px;padding:14px 18px;min-width:180px;font-family:Outfit,sans-serif"><div style="font-weight:800;color:#f1f5f9;margin-bottom:6px">'+nm+'</div><div style="font-size:12px;color:#94a3b8">'+d.deals+' deals \u2022 Click for details</div></div>'});
+      ps.mapPolygons.template.events.on("click",function(ev){var id=ev.target.dataItem.get("id");var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});if(nm&&countryData[nm])openCountryPanel(nm,countryData[nm])});
+      var ptS=chart.series.push(am5map.MapPointSeries.new(root,{}));
+      var aL2=[];Object.keys(countryData).forEach(function(nm){var iso=nameToIso[nm];if(!iso||!coords[iso])return;var d=countryData[nm];aL2.push({nm:nm,iso:iso,total:d.signed+d.pipeline,signed:d.signed,lat:coords[iso].lat,lng:coords[iso].lng})});
+      aL2.sort(function(a,b){return b.total-a.total});
+      aL2.forEach(function(item,idx){var di=ptS.pushDataItem({latitude:item.lat,longitude:item.lng});var ctr=am5.Container.new(root,{});var br=idx<3?9:idx<6?7:5;var col=item.signed>0?am5.color("#10b981"):am5.color("#3b82f6");ctr.children.push(am5.Circle.new(root,{radius:br+6,fill:col,fillOpacity:0.12}));var c2=ctr.children.push(am5.Circle.new(root,{radius:br,fill:col,fillOpacity:0.9,stroke:am5.color("#fff"),strokeWidth:2}));if(idx<3){var p2=ctr.children.push(am5.Circle.new(root,{radius:br,fill:col,fillOpacity:0}));p2.animate({key:"radius",to:br+18,duration:2000,loops:Infinity,easing:am5.ease.out(am5.ease.cubic)});p2.animate({key:"fillOpacity",from:0.35,to:0,duration:2000,loops:Infinity,easing:am5.ease.out(am5.ease.cubic)})}c2.events.on("pointerover",function(){c2.animate({key:"scale",to:1.5,duration:200})});c2.events.on("pointerout",function(){c2.animate({key:"scale",to:1,duration:200})});di.set("bullet",am5.Bullet.new(root,{sprite:ctr}))});
+      chart.set("zoomControl",am5map.ZoomControl.new(root,{}));
+      var lg2=chart.children.push(am5.Container.new(root,{layout:root.horizontalLayout,x:20,y:am5.percent(95),centerY:am5.percent(100)}));
+      function aLg(c,l){var ct=lg2.children.push(am5.Container.new(root,{layout:root.horizontalLayout,paddingRight:16}));ct.children.push(am5.Circle.new(root,{radius:5,fill:am5.color(c),dy:1}));ct.children.push(am5.Label.new(root,{text:l,fill:am5.color("#94a3b8"),fontSize:11,paddingLeft:6}))}
+      aLg("#10b981","Signed");aLg("#3b82f6","Pipeline");aLg("#1a2236","No deals");
+      chart.appear(1000,100);
+    }catch(err){console.error("Sales map error:",err);mapEl.innerHTML='<div style="padding:40px;text-align:center;color:#ef4444">Error: '+err.message+'</div>'}
+  }
+
+  if(typeof am5!=="undefined"&&typeof am5map!=="undefined"&&typeof am5geodata_worldLow!=="undefined"){setTimeout(doBuild2,50)}
+  else{
+    var w2=0;var wi2=setInterval(function(){w2++;if(typeof am5!=="undefined"&&typeof am5map!=="undefined"){clearInterval(wi2);setTimeout(doBuild2,50)}else if(w2>50){clearInterval(wi2)}},200);
+  }
+}
+
+function renderSalesDashContent(el){
   var s=SA;
   var cons=D.contracts;
   var signed=cons.filter(function(c){return c.stage==='Signed'});
   var pipeline=cons.filter(function(c){return c.stage!=='Signed'});
-  var signedVal=signed.reduce(function(s,c){return s+c.value},0);
-  var pipVal=pipeline.reduce(function(s,c){return s+c.value},0);
-  var pipW=pipeline.reduce(function(s,c){return s+c.weighted},0);
+  var signedVal=signed.reduce(function(sm,c){return sm+c.value},0);
+  var pipVal=pipeline.reduce(function(sm,c){return sm+c.value},0);
+  var pipW=pipeline.reduce(function(sm,c){return sm+c.weighted},0);
 
   var h='<div class="kg kg4">';
   h+=kpi('\u2714','Signed',fmt(signedVal),signed.length+' deals','var(--gn)');
@@ -629,104 +701,47 @@ function renderSalesDash(el){
 
   // Signed grouped by salesperson
   var signedBySp2={};
-  signed.forEach(function(c){
-    var sp=c.salespersonName||'Unassigned';
-    if(!signedBySp2[sp]) signedBySp2[sp]={total:0,count:0,deals:[]};
-    signedBySp2[sp].total+=c.value; signedBySp2[sp].count++; signedBySp2[sp].deals.push(c);
-  });
+  signed.forEach(function(c){var sp=c.salespersonName||'Unassigned';if(!signedBySp2[sp])signedBySp2[sp]={total:0,count:0,deals:[]};signedBySp2[sp].total+=c.value;signedBySp2[sp].count++;signedBySp2[sp].deals.push(c)});
   var signedSps2=Object.keys(signedBySp2).sort(function(a,b){return signedBySp2[b].total-signedBySp2[a].total});
-
-  h+='<div class="tw"><div class="tw-h" style="color:var(--gn)">\u2714 Signed <span class="ct">'+signed.length+'</span></div>';
-  h+='<div style="overflow-x:auto;max-height:350px"><table><thead><tr>';
-  h+='<th>Salesperson</th><th>Deals</th><th>Total Value</th>';
-  h+='</tr></thead><tbody id="sdSignTbl">';
-  signedSps2.forEach(function(sp){
-    var d=signedBySp2[sp];
-    h+='<tr class="clickrow sp-row2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="cursor:pointer">';
-    h+='<td style="font-weight:700">'+sp+'</td>';
-    h+='<td class="mono">'+d.count+'</td>';
-    h+='<td class="mono" style="font-weight:700;color:var(--gn)">'+fmt(d.total)+'</td></tr>';
-    var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};
-    d.deals.forEach(function(c){
-      var col=ic[c.industry]||'var(--txM)';
-      h+='<tr class="sp-detail2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="display:none">';
-      h+='<td style="padding-left:32px;color:var(--txD)">'+c.client+'<span style="margin-left:8px;color:var(--txM);font-size:10px">'+c.country+'</span></td>';
-      h+='<td><span class="pill" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span></td>';
-      h+='<td class="mono" style="font-weight:600">'+fmt(c.value)+'</td></tr>';
-    });
-  });
+  h+='<div class="tw"><div class="tw-h" style="color:var(--gn)">\u2714 Signed <span class="ct">'+signed.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table><thead><tr><th>Salesperson</th><th>Deals</th><th>Total Value</th></tr></thead><tbody id="sdSignTbl">';
+  signedSps2.forEach(function(sp){var d=signedBySp2[sp];var ic={Government:'var(--ac)',Enterprise:'var(--pk)',Academy:'var(--gn)'};
+    h+='<tr class="clickrow sp-row2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="cursor:pointer"><td style="font-weight:700">'+sp+'</td><td class="mono">'+d.count+'</td><td class="mono" style="font-weight:700;color:var(--gn)">'+fmt(d.total)+'</td></tr>';
+    d.deals.forEach(function(c){var col=ic[c.industry]||'var(--txM)';h+='<tr class="sp-detail2" data-sp="ds-'+sp.replace(/\s/g,'')+'" style="display:none"><td style="padding-left:32px;color:var(--txD)">'+c.client+' <span style="color:var(--txM);font-size:10px">'+c.country+'</span></td><td><span class="pill" style="background:'+col+'18;color:'+col+'">'+c.industry+'</span></td><td class="mono" style="font-weight:600">'+fmt(c.value)+'</td></tr>'})});
   h+='</tbody></table></div></div>';
 
-  // Pipeline grouped by salesperson
+  // Pipeline grouped
   var pipBySp2={};
-  pipeline.forEach(function(c){
-    var sp=c.salespersonName||'Unassigned';
-    if(!pipBySp2[sp]) pipBySp2[sp]={total:0,weighted:0,count:0,deals:[]};
-    pipBySp2[sp].total+=c.value; pipBySp2[sp].weighted+=c.weighted;
-    pipBySp2[sp].count++; pipBySp2[sp].deals.push(c);
-  });
+  pipeline.forEach(function(c){var sp=c.salespersonName||'Unassigned';if(!pipBySp2[sp])pipBySp2[sp]={total:0,weighted:0,count:0,deals:[]};pipBySp2[sp].total+=c.value;pipBySp2[sp].weighted+=c.weighted;pipBySp2[sp].count++;pipBySp2[sp].deals.push(c)});
   var pipSps2=Object.keys(pipBySp2).sort(function(a,b){return pipBySp2[b].weighted-pipBySp2[a].weighted});
-
-  h+='<div class="tw"><div class="tw-h" style="color:var(--ac)">\u25CE Pipeline <span class="ct">'+pipeline.length+'</span></div>';
-  h+='<div style="overflow-x:auto;max-height:350px"><table><thead><tr>';
-  h+='<th>Salesperson</th><th>Deals</th><th>Total Value</th><th>Weighted</th>';
-  h+='</tr></thead><tbody id="sdPipeTbl">';
-  pipSps2.forEach(function(sp){
-    var d=pipBySp2[sp];
-    h+='<tr class="clickrow sp-row2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="cursor:pointer">';
-    h+='<td style="font-weight:700">'+sp+'</td>';
-    h+='<td class="mono">'+d.count+'</td>';
-    h+='<td class="mono" style="font-weight:700">'+fmt(d.total)+'</td>';
-    h+='<td class="mono" style="font-weight:700;color:var(--acL)">'+fmt(d.weighted)+'</td></tr>';
-    var stColors2={'Initial Contact':'var(--txM)','Email Sent':'var(--cy)','Demo':'var(--ac)','Negotiation':'var(--am)'};
-    d.deals.forEach(function(c){
-      var stCol=stColors2[c.stage]||'var(--txM)';
-      h+='<tr class="sp-detail2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="display:none">';
-      h+='<td style="padding-left:32px;color:var(--txD)">'+c.client+'<span style="margin-left:8px;color:var(--txM);font-size:10px">'+c.country+'</span></td>';
-      h+='<td><span class="pill" style="background:'+stCol+'18;color:'+stCol+'">'+c.stage+'</span></td>';
-      h+='<td class="mono" style="font-weight:600">'+fmt(c.value)+'</td>';
-      h+='<td class="mono" style="color:var(--acL)">'+fmt(c.weighted)+'</td></tr>';
-    });
-  });
+  h+='<div class="tw"><div class="tw-h" style="color:var(--ac)">\u25CE Pipeline <span class="ct">'+pipeline.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table><thead><tr><th>Salesperson</th><th>Deals</th><th>Total Value</th><th>Weighted</th></tr></thead><tbody id="sdPipeTbl">';
+  pipSps2.forEach(function(sp){var d=pipBySp2[sp];var stColors2={'Initial Contact':'var(--txM)','Email Sent':'var(--cy)','Demo':'var(--ac)','Negotiation':'var(--am)'};
+    h+='<tr class="clickrow sp-row2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="cursor:pointer"><td style="font-weight:700">'+sp+'</td><td class="mono">'+d.count+'</td><td class="mono" style="font-weight:700">'+fmt(d.total)+'</td><td class="mono" style="font-weight:700;color:var(--acL)">'+fmt(d.weighted)+'</td></tr>';
+    d.deals.forEach(function(c){var stCol=stColors2[c.stage]||'var(--txM)';h+='<tr class="sp-detail2" data-sp="dp-'+sp.replace(/\s/g,'')+'" style="display:none"><td style="padding-left:32px;color:var(--txD)">'+c.client+' <span style="color:var(--txM);font-size:10px">'+c.country+'</span></td><td><span class="pill" style="background:'+stCol+'18;color:'+stCol+'">'+c.stage+'</span></td><td class="mono" style="font-weight:600">'+fmt(c.value)+'</td><td class="mono" style="color:var(--acL)">'+fmt(c.weighted)+'</td></tr>'})});
   h+='</tbody></table></div></div>';
 
   el.innerHTML=h;
 
   // Charts
   mk('chSD0',{type:'doughnut',data:{labels:['Signed','Pipeline (Wtd)'],datasets:[{data:[signedVal,pipW],backgroundColor:['#10b981','#3b82f6'],borderWidth:0}]},options:{scales:{x:{display:false},y:{display:false}},cutout:'55%',plugins:{legend:{display:true,position:'bottom'}}}});
-
   var tN2=Object.keys(s.byType);
   var tS2=tN2.map(function(t){return s.byType[t].signed||0});
   var tP2=tN2.map(function(t){return s.byType[t].pipeline||0});
-  mk('chSD1',{type:'bar',data:{labels:tN2,datasets:[
-    {label:'Signed',data:tS2,backgroundColor:'#10b981',borderRadius:3,stack:'s'},
-    {label:'Pipeline',data:tP2,backgroundColor:'#3b82f680',borderRadius:{topLeft:3,topRight:3},stack:'s'}
-  ]},options:{plugins:{legend:{display:true,position:'bottom'}}}});
-
+  mk('chSD1',{type:'bar',data:{labels:tN2,datasets:[{label:'Signed',data:tS2,backgroundColor:'#10b981',stack:'s'},{label:'Pipeline',data:tP2,backgroundColor:'#3b82f680',stack:'s'}]},options:{plugins:{legend:{display:true,position:'bottom'}}}});
   var cN2=Object.keys(s.byCountry);
   var cS2=cN2.map(function(c){return s.byCountry[c].signed||0});
   var cP2=cN2.map(function(c){return s.byCountry[c].pipeline||0});
-  mk('chSD2',{type:'bar',data:{labels:cN2,datasets:[
-    {label:'Signed',data:cS2,backgroundColor:'#10b981',borderRadius:3,stack:'s'},
-    {label:'Pipeline',data:cP2,backgroundColor:'#3b82f680',borderRadius:{topLeft:3,topRight:3},stack:'s'}
-  ]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}},plugins:{legend:{display:true,position:'bottom'}}}});
-
-  document.getElementById('btnExpandCountry2').addEventListener('click',function(){
-    openCountryBreakdown(D.contracts);
-  });
+  mk('chSD2',{type:'bar',data:{labels:cN2,datasets:[{label:'Signed',data:cS2,backgroundColor:'#10b981',stack:'s'},{label:'Pipeline',data:cP2,backgroundColor:'#3b82f680',stack:'s'}]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}},plugins:{legend:{display:true,position:'bottom'}}}});
+  document.getElementById('btnExpandCountry2').addEventListener('click',function(){openCountryBreakdown(D.contracts)});
   makeSearchable('sdSignTbl');
   makeSearchable('sdPipeTbl');
-
-  // Toggle expand
-  document.querySelectorAll('.sp-row2').forEach(function(row){
-    row.addEventListener('click',function(){
-      var sp=this.dataset.sp;
-      var details=document.querySelectorAll('.sp-detail2[data-sp="'+sp+'"]');
-      var showing=details[0]&&details[0].style.display!=='none';
-      details.forEach(function(d){d.style.display=showing?'none':'table-row'});
-    });
-  });
+  document.querySelectorAll('.sp-row2').forEach(function(row){row.addEventListener('click',function(){var sp=this.dataset.sp;var details=document.querySelectorAll('.sp-detail2[data-sp="'+sp+'"]');var showing=details[0]&&details[0].style.display!=='none';details.forEach(function(d){d.style.display=showing?'none':'table-row'})})});
 }
+
+
+
+
+
+
 
 // ══════════════════════════════════════════
 // SETTINGS (admin only)
