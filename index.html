@@ -4,6 +4,11 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FinStack CFO</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script src="https://cdn.amcharts.com/lib/5/index.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/map.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/geodata/worldLow.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/themes/Animated.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0B0F1A;--card:#111827;--cardH:#1a2236;--sb:#0d1117;--bd:#1e293b;--bdL:#2a3a52;--tx:#e2e8f0;--txD:#94a3b8;--txM:#64748b;--ac:#3b82f6;--acL:#60a5fa;--acG:rgba(59,130,246,.15);--gn:#10b981;--gnG:rgba(16,185,129,.12);--rd:#ef4444;--rdG:rgba(239,68,68,.12);--am:#f59e0b;--pu:#8b5cf6;--cy:#06b6d4;--pk:#ec4899;--tl:#14b8a6;--f:'Outfit',system-ui,sans-serif;--fm:'JetBrains Mono',monospace}
@@ -137,7 +142,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div class="sb-user"><div><div class="sb-user-name" id="userName"></div><div class="sb-user-role" id="userRole"></div></div><button class="sb-logout" id="logoutBtn">Logout</button></div>
   </div>
   <div class="main">
-    <div class="hdr"><div class="hdr-kpis" id="hdrK"></div><div style="display:flex;gap:10px;align-items:center"><div id="rateBox" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid var(--bdL);background:var(--cardH);font-size:12px"><span style="color:var(--txM)">$/\u20AA</span><span id="rateValue" class="mono" style="font-weight:700;font-size:13px"></span><span id="rateLock" style="font-size:9px;color:var(--txM);margin-left:2px"></span></div><button class="tog" id="togBtn"><div class="tog-track on" id="togT"><div class="tog-thumb"></div></div><span id="togL">Weighted</span></button></div></div>
+    <div class="hdr"><div class="hdr-kpis" id="hdrK"></div><div style="display:flex;gap:10px;align-items:center"><div id="rateBox" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid var(--bdL);background:var(--cardH);font-size:12px"><span style="color:var(--txM)">$/₪</span><span id="rateValue" class="mono" style="font-weight:700;font-size:13px"></span><span id="rateLock" style="font-size:9px;color:var(--txM);margin-left:2px"></span></div><button class="tog" id="togBtn"><div class="tog-track on" id="togT"><div class="tog-thumb"></div></div><span id="togL">Weighted</span></button></div></div>
     <div class="content" id="mainContent"></div>
   </div>
 </div>
@@ -148,6 +153,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 (function(){var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';s.onload=bootApp;document.head.appendChild(s)})();
 
 var W=true,SD=0,SG=0,SS=15000,D=null,SA=null,charts={},TOKEN=null,USER=null,STAGES=[];
+var COUNTRIES=["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahrain","Bangladesh","Belarus","Belgium","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Guatemala","Guinea","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Mauritania","Mauritius","Mexico","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saudi Arabia","Senegal","Serbia","Sierra Leone","Singapore","Slovakia","Slovenia","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Togo","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","UAE","Uganda","Ukraine","United Kingdom","United States","Uruguay","Uzbekistan","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
+
+function makeCountrySelect(inputId,value){
+  var el=document.getElementById(inputId);if(!el)return;
+  var wrap=document.createElement('div');wrap.style.cssText='position:relative';
+  el.parentNode.insertBefore(wrap,el);wrap.appendChild(el);
+  el.setAttribute('list',inputId+'_list');el.setAttribute('autocomplete','off');
+  el.value=value||'';
+  var dl=document.createElement('datalist');dl.id=inputId+'_list';
+  COUNTRIES.forEach(function(c){var o=document.createElement('option');o.value=c;dl.appendChild(o)});
+  wrap.appendChild(dl);
+}
 var MO=['01','02','03','04','05','06','07','08','09','10','11','12'];
 function fmt(n){if(n==null)return'\u2014';var a=Math.abs(n);if(a>=1e6)return'$'+(n/1e6).toFixed(2)+'M';if(a>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
 function fmtP(n){return n==null?'\u2014':n.toFixed(1)+'%'}
@@ -216,7 +233,7 @@ document.getElementById('togBtn').addEventListener('click',function(){W=!W;docum
 function buildNav(){
   var items=[];
   if(USER.role==='admin'){
-    items=[{id:'dashboard',label:'Dashboard',icon:'&#9632;'},{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'settings',label:'Detailed Info',icon:'&#9632;'}];
+    items=[{id:'dashboard',label:'Dashboard',icon:'&#9632;'},{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'payments',label:'Payments',icon:'&#9632;'},{id:'settings',label:'Detailed Info',icon:'&#9632;'}];
   }else if(USER.role==='sales_manager'){
     items=[{id:'sales',label:'Sales Pipeline',icon:'&#9632;'},{id:'salesdash',label:'Sales Dashboard',icon:'&#9632;'},{id:'team',label:'Team Settings',icon:'&#9632;'}];
   }else{
@@ -246,6 +263,7 @@ function renderPage(){
   if(currentPage==='dashboard')renderAdminDashboard(c);
   else if(currentPage==='sales')renderSalesPipeline(c);
   else if(currentPage==='salesdash')renderSalesDash(c);
+  else if(currentPage==='payments')renderPayments(c);
   else if(currentPage==='settings')renderSettings(c);
   else if(currentPage==='team')renderTeamSettings(c);
   setTimeout(function(){Object.values(charts).forEach(function(ch){try{ch.resize()}catch(e){}})},150);
@@ -270,10 +288,10 @@ function renderHeader(){
 // ADMIN DASHBOARD (Financial + Sales + Expenses tabs)
 // ══════════════════════════════════════════
 function renderAdminDashboard(el){
-  var h='<div class="subtabs" id="adTabs"><button class="stab act" data-st="fin">Financial</button><button class="stab" data-st="sal">Sales Summaries</button><button class="stab" data-st="exp">Expenses</button><button class="stab" data-st="scen">What-If</button></div>';
-  h+='<div class="stab-content act" id="st-fin"></div><div class="stab-content" id="st-sal"></div><div class="stab-content" id="st-exp"></div><div class="stab-content" id="st-scen"></div>';
+  var h='<div class="subtabs" id="adTabs"><button class="stab act" data-st="fin">Financial</button><button class="stab" data-st="sal">Sales Summaries</button><button class="stab" data-st="exp">Expenses</button><button class="stab" data-st="map">Sales Map</button><button class="stab" data-st="scen">What-If</button></div>';
+  h+='<div class="stab-content act" id="st-fin"></div><div class="stab-content" id="st-sal"></div><div class="stab-content" id="st-exp"></div><div class="stab-content" id="st-map"></div><div class="stab-content" id="st-scen"></div>';
   el.innerHTML=h;
-  document.getElementById('adTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#adTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
+  document.getElementById('adTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#adTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='map'){renderSalesMap(document.getElementById('st-map'))}setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
   renderFinancial();renderSalesSummary();renderExpensesTab();renderScenario();
 }
 
@@ -368,6 +386,7 @@ function renderSalesSummary(){
   h+='<div class="cc"><div class="cc-t">Signed vs Pipeline</div><div style="height:260px"><canvas id="chSvP"></canvas></div></div>';
   h+='<div class="cc"><div class="cc-t">By Type</div><div style="height:260px"><canvas id="chST"></canvas></div></div>';
   h+='<div class="cc"><div class="cc-t" style="justify-content:space-between">By Country <button class="btn-ghost" id="btnExpandCountry" style="padding:4px 12px;font-size:11px">Expand</button></div><div style="height:260px"><canvas id="chSC2"></canvas></div></div></div>';
+
   function buildSpTbl(deals,pfx,col,showW){var bySp={};deals.forEach(function(c){var sp=c.salespersonName||'Unassigned';if(!bySp[sp])bySp[sp]={total:0,weighted:0,count:0,deals:[]};bySp[sp].total+=c.value;bySp[sp].weighted+=c.weighted;bySp[sp].count++;bySp[sp].deals.push(c)});var sps=Object.keys(bySp).sort(function(a,b){return bySp[b].total-bySp[a].total});var t='<thead><tr><th>Salesperson</th><th>Deals</th><th>Total</th>'+(showW?'<th>Weighted</th>':'')+'</tr></thead><tbody>';sps.forEach(function(sp){var d=bySp[sp];var k=pfx+sp.replace(/\s/g,'');t+='<tr class="clickrow sp-row" data-sp="'+k+'"><td style="font-weight:700">'+sp+'</td><td class="mono">'+d.count+'</td><td class="mono" style="font-weight:700;color:'+col+'">'+fmt(d.total)+'</td>'+(showW?'<td class="mono" style="color:var(--acL)">'+fmt(d.weighted)+'</td>':'')+'</tr>';var stC={"Initial Contact":"var(--txM)","Email Sent":"var(--cy)","Demo":"var(--ac)","Negotiation":"var(--am)","Signed":"var(--gn)"};d.deals.forEach(function(c){var sc=stC[c.stage]||'var(--txM)';t+='<tr class="sp-detail" data-sp="'+k+'" style="display:none"><td style="padding-left:32px;color:var(--txD)">'+c.client+' <span style="color:var(--txM);font-size:10px">'+c.country+'</span></td><td><span class="pill" style="background:'+sc+'18;color:'+sc+'">'+c.stage+'</span></td><td class="mono">'+fmt(c.value)+'</td>'+(showW?'<td class="mono" style="color:var(--acL)">'+fmt(c.weighted)+'</td>':'')+'</tr>'})});return t+'</tbody>'}
   h+='<div class="tw"><div class="tw-h" style="color:var(--gn)">\u2714 Signed <span class="ct">'+signed.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table>'+buildSpTbl(signed,'s-','var(--gn)',false)+'</table></div></div>';
   h+='<div class="tw"><div class="tw-h" style="color:var(--ac)">\u25CE Pipeline <span class="ct">'+pipeline.length+'</span></div><div style="overflow-x:auto;max-height:350px"><table>'+buildSpTbl(pipeline,'p-','var(--ac)',true)+'</table></div></div>';
@@ -378,6 +397,8 @@ function renderSalesSummary(){
   var cN=Object.keys(localByCountry).sort(function(a,b){return(localByCountry[b].signed+localByCountry[b].pipeline)-(localByCountry[a].signed+localByCountry[a].pipeline)}).slice(0,10);
   mk('chSC2',{type:'bar',data:{labels:cN,datasets:[{label:'Signed',data:cN.map(function(c){return localByCountry[c].signed}),backgroundColor:'#10b981',stack:'s'},{label:'Pipeline',data:cN.map(function(c){return localByCountry[c].pipeline}),backgroundColor:'#3b82f680',stack:'s'}]},options:{indexAxis:'y',scales:{x:{stacked:true,ticks:{callback:function(v){return fmt(v)}}},y:{stacked:true,ticks:{font:{size:11}}}},plugins:{legend:{display:true,position:'bottom'}}}});
   document.getElementById('btnExpandCountry').addEventListener('click',function(){openCountryBreakdown(cons)});
+
+
   document.querySelectorAll('.sp-row').forEach(function(row){row.addEventListener('click',function(){var sp=this.dataset.sp;var d=document.querySelectorAll('.sp-detail[data-sp="'+sp+'"]');var sh=d[0]&&d[0].style.display!=='none';d.forEach(function(r){r.style.display=sh?'none':'table-row'})})});
 }
 
@@ -470,7 +491,7 @@ function renderSalesPipeline(el){
   h+='<select id="nd-in"><option>Government</option>';
   h+='<option>Enterprise</option><option>Academy</option></select></div>';
   h+='<div class="fg"><label>Value *</label>';
-  h+='<div style="display:flex;gap:4px"><select id="nd-cur" style="background:var(--cardH);border:1px solid var(--bd);border-radius:8px 0 0 8px;padding:10px 6px;color:var(--tx);font-family:var(--f);font-size:12px;width:64px"><option value="USD">$ USD</option><option value="ILS">\u20AA ILS</option></select><input id="nd-va" type="number" placeholder="100000" style="flex:1;border-radius:0 8px 8px 0"></div></div>';
+  h+='<div style="display:flex;gap:4px"><select id="nd-cur" style="background:var(--cardH);border:1px solid var(--bd);border-radius:8px 0 0 8px;padding:10px 6px;color:var(--tx);font-family:var(--f);font-size:12px;width:64px"><option value="USD">$ USD</option><option value="ILS">\u20AA ILS</option><option value="EUR">\u20AC EUR</option></select><input id="nd-va" type="number" placeholder="100000" style="flex:1;border-radius:0 8px 8px 0"></div></div>';
   h+='<div class="fg"><label>Signing Date</label>';
   h+='<input id="nd-sd" type="date" value="2026-01-01"></div>';
   h+='<div class="fg"><label>DSO (days)</label>';
@@ -572,6 +593,7 @@ function renderSalesPipeline(el){
   });
   document.getElementById('pipTbl').innerHTML=rows;
   makeSearchable('pipTbl');
+  makeCountrySelect('nd-co','');
   document.querySelectorAll('#pipTbl .clickrow').forEach(function(r){
     r.addEventListener('click',function(){
       var c=D.contracts.find(function(x){return x.id===r.dataset.cid});
@@ -709,6 +731,506 @@ function renderSalesDash(el){
 // ══════════════════════════════════════════
 // SETTINGS (admin only)
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+// SALES MAP (admin only)
+// ══════════════════════════════════════════
+function openCountryPanel(countryName,data){
+  // Remove existing panel
+  var old=document.getElementById('countryPanel');if(old)old.remove();
+  var stColors={'Initial Contact':'#64748b','Email Sent':'#06b6d4','Demo':'#3b82f6','Negotiation':'#f59e0b','Signed':'#10b981'};
+  var total=data.signed+data.pipeline;
+
+  var h='<div id="countryPanel" style="position:fixed;top:0;right:0;width:420px;height:100vh;background:rgba(15,23,42,0.98);backdrop-filter:blur(20px);border-left:1px solid rgba(100,116,139,0.2);z-index:10000;overflow-y:auto;font-family:var(--f);animation:slideIn .3s ease">';
+  h+='<style>@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}</style>';
+
+  // Header
+  h+='<div style="padding:24px;border-bottom:1px solid #1e293b">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center">';
+  h+='<div style="font-size:22px;font-weight:900;color:#f1f5f9">'+countryName+'</div>';
+  h+='<button onclick="document.getElementById(\'countryPanel\').remove()" style="background:none;border:1px solid #334155;border-radius:8px;width:32px;height:32px;color:#94a3b8;cursor:pointer;font-size:16px">\u2715</button>';
+  h+='</div>';
+  h+='<div style="display:flex;gap:12px;margin-top:14px">';
+  h+='<div style="flex:1;background:rgba(16,185,129,0.1);border-radius:10px;padding:10px 14px"><div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Signed</div><div style="font-size:20px;font-weight:800;color:#10b981">'+fmt(data.signed)+'</div></div>';
+  h+='<div style="flex:1;background:rgba(59,130,246,0.1);border-radius:10px;padding:10px 14px"><div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Pipeline</div><div style="font-size:20px;font-weight:800;color:#3b82f6">'+fmt(data.pipeline)+'</div></div>';
+  h+='<div style="flex:1;background:rgba(245,158,11,0.1);border-radius:10px;padding:10px 14px"><div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Deals</div><div style="font-size:20px;font-weight:800;color:#f59e0b">'+data.deals+'</div></div>';
+  h+='</div></div>';
+
+  // Client list
+  h+='<div style="padding:16px 24px">';
+  h+='<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Clients & Deals</div>';
+
+  data.contracts.forEach(function(c){
+    var stColor=stColors[c.stage]||'#64748b';
+    h+='<div class="map-client-row" data-cid="'+c.id+'" style="background:#111827;border:1px solid #1e293b;border-radius:12px;padding:14px 16px;margin-bottom:8px;cursor:pointer;transition:all .2s" onmouseover="this.style.borderColor=\'#3b82f6\';this.style.background=\'#1a2236\'" onmouseout="this.style.borderColor=\'#1e293b\';this.style.background=\'#111827\'">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    h+='<div style="font-size:14px;font-weight:700;color:#e2e8f0">'+c.client+'</div>';
+    h+='<span style="background:'+stColor+'20;color:'+stColor+';padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700">'+c.stage+'</span>';
+    h+='</div>';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center">';
+    h+='<div>';
+    h+='<span style="color:#94a3b8;font-size:11px">'+c.industry+'</span>';
+    if(c.salespersonName) h+='<span style="color:#64748b;font-size:11px"> \u2022 '+c.salespersonName+'</span>';
+    h+='</div>';
+    h+='<div style="font-size:15px;font-weight:800;color:'+(c.stage==='Signed'?'#10b981':'#94a3b8')+'">'+fmt(c.value)+'</div>';
+    h+='</div>';
+    h+='</div>';
+  });
+
+  h+='</div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+
+  // Click handlers for each client row
+  document.querySelectorAll('.map-client-row').forEach(function(row){
+    row.addEventListener('click',function(){
+      var cid=this.dataset.cid;
+      var contract=D.contracts.find(function(x){return x.id===cid});
+      if(contract){
+        document.getElementById('countryPanel').remove();
+        openContractCard(contract);
+      }
+    });
+  });
+
+  // Close on Escape
+  function escHandler(e){if(e.key==='Escape'){var p=document.getElementById('countryPanel');if(p){p.remove();document.removeEventListener('keydown',escHandler)}}}
+  document.addEventListener('keydown',escHandler);
+}
+
+function renderSalesMap(el){
+  var cons=D.contracts||[];
+  var countryData={};
+  cons.forEach(function(c){
+    var co=c.country||'Unknown';
+    if(!countryData[co])countryData[co]={signed:0,pipeline:0,deals:0,clients:[],industries:[],contracts:[]};
+    countryData[co].deals++;
+    if(c.stage==='Signed')countryData[co].signed+=c.value;
+    else countryData[co].pipeline+=c.weighted;
+    if(countryData[co].clients.indexOf(c.client)===-1)countryData[co].clients.push(c.client);
+    if(countryData[co].industries.indexOf(c.industry)===-1)countryData[co].industries.push(c.industry);
+    countryData[co].contracts.push(c);
+  });
+
+  var nameToIso={"Afghanistan":"AF","Albania":"AL","Algeria":"DZ","Angola":"AO","Argentina":"AR","Armenia":"AM","Australia":"AU","Austria":"AT","Azerbaijan":"AZ","Bangladesh":"BD","Belarus":"BY","Belgium":"BE","Bolivia":"BO","Bosnia and Herzegovina":"BA","Brazil":"BR","Bulgaria":"BG","Cambodia":"KH","Cameroon":"CM","Canada":"CA","Chile":"CL","China":"CN","Colombia":"CO","Croatia":"HR","Cyprus":"CY","Czech Republic":"CZ","Denmark":"DK","Ecuador":"EC","Egypt":"EG","Estonia":"EE","Ethiopia":"ET","Finland":"FI","France":"FR","Gabon":"GA","Georgia":"GE","Germany":"DE","Ghana":"GH","Greece":"GR","Guatemala":"GT","Hungary":"HU","Iceland":"IS","India":"IN","Indonesia":"ID","Iran":"IR","Iraq":"IQ","Ireland":"IE","Israel":"IL","Italy":"IT","Ivory Coast":"CI","Japan":"JP","Jordan":"JO","Kazakhstan":"KZ","Kenya":"KE","Kosovo":"XK","Kuwait":"KW","Latvia":"LV","Lebanon":"LB","Libya":"LY","Lithuania":"LT","Luxembourg":"LU","Malaysia":"MY","Mexico":"MX","Morocco":"MA","Netherlands":"NL","New Zealand":"NZ","Nigeria":"NG","Norway":"NO","Oman":"OM","Pakistan":"PK","Peru":"PE","Philippines":"PH","Poland":"PL","Portugal":"PT","Qatar":"QA","Romania":"RO","Russia":"RU","Saudi Arabia":"SA","Senegal":"SN","Serbia":"RS","Singapore":"SG","Slovakia":"SK","Slovenia":"SI","South Africa":"ZA","South Korea":"KR","Spain":"ES","Sri Lanka":"LK","Sweden":"SE","Switzerland":"CH","Taiwan":"TW","Tanzania":"TZ","Thailand":"TH","Tunisia":"TN","Turkey":"TR","UAE":"AE","Uganda":"UG","Ukraine":"UA","United Kingdom":"GB","United States":"US","Uruguay":"UY","Venezuela":"VE","Vietnam":"VN","Yemen":"YE","Zambia":"ZM","Zimbabwe":"ZW","Palestine":"PS"};
+
+  var coords={"AF":{lat:33,lng:65},"AL":{lat:41,lng:20},"DZ":{lat:28,lng:3},"AO":{lat:-12,lng:18},"AR":{lat:-34,lng:-64},"AU":{lat:-25,lng:134},"AT":{lat:47.5,lng:14},"AZ":{lat:40.5,lng:48},"BD":{lat:24,lng:90},"BE":{lat:50.8,lng:4.4},"BR":{lat:-14,lng:-51},"BG":{lat:43,lng:25},"KH":{lat:12.5,lng:105},"CM":{lat:6,lng:12},"CA":{lat:56,lng:-106},"CL":{lat:-35,lng:-71},"CN":{lat:35,lng:105},"CO":{lat:4,lng:-72},"HR":{lat:45.2,lng:15.5},"CY":{lat:35,lng:33},"CZ":{lat:50,lng:15.5},"DK":{lat:56,lng:10},"EC":{lat:-2,lng:-78},"EG":{lat:27,lng:30},"EE":{lat:59,lng:26},"ET":{lat:9,lng:38},"FI":{lat:64,lng:26},"FR":{lat:46,lng:2},"GA":{lat:-1,lng:11.6},"GE":{lat:42,lng:44},"DE":{lat:51,lng:10},"GH":{lat:8,lng:-1.2},"GR":{lat:39,lng:22},"HU":{lat:47,lng:20},"IS":{lat:65,lng:-18},"IN":{lat:21,lng:78},"ID":{lat:-5,lng:120},"IR":{lat:32,lng:53},"IQ":{lat:33,lng:44},"IE":{lat:53,lng:-8},"IL":{lat:31.5,lng:35},"IT":{lat:42.8,lng:12.6},"CI":{lat:7.5,lng:-5.5},"JP":{lat:36,lng:138},"JO":{lat:31,lng:36.5},"KZ":{lat:48,lng:67},"KE":{lat:-1,lng:38},"XK":{lat:42.6,lng:21},"KW":{lat:29.3,lng:47.6},"LV":{lat:57,lng:25},"LB":{lat:34,lng:36},"LY":{lat:27,lng:17},"LT":{lat:56,lng:24},"LU":{lat:49.8,lng:6.1},"MY":{lat:4,lng:108},"MX":{lat:23,lng:-102},"MA":{lat:32,lng:-5},"NL":{lat:52.5,lng:5.7},"NZ":{lat:-41,lng:174},"NG":{lat:10,lng:8},"NO":{lat:62,lng:10},"OM":{lat:21,lng:57},"PK":{lat:30,lng:69},"PE":{lat:-10,lng:-76},"PH":{lat:13,lng:122},"PL":{lat:52,lng:20},"PT":{lat:39.4,lng:-8},"QA":{lat:25.3,lng:51.2},"RO":{lat:46,lng:25},"RU":{lat:62,lng:105},"SA":{lat:24,lng:45},"SN":{lat:14,lng:-14.5},"RS":{lat:44,lng:21},"SG":{lat:1.35,lng:104},"SK":{lat:48.7,lng:19.7},"SI":{lat:46.1,lng:14.5},"ZA":{lat:-30,lng:25},"KR":{lat:36,lng:128},"ES":{lat:40,lng:-4},"LK":{lat:7.9,lng:80.8},"SE":{lat:62,lng:15},"CH":{lat:47,lng:8.2},"TW":{lat:23.7,lng:121},"TZ":{lat:-6.4,lng:35},"TH":{lat:15,lng:100},"TN":{lat:34,lng:9},"TR":{lat:39,lng:35},"AE":{lat:24,lng:54},"UG":{lat:1,lng:32},"UA":{lat:49,lng:32},"GB":{lat:54,lng:-2},"US":{lat:40,lng:-100},"UY":{lat:-33,lng:-56},"VE":{lat:7,lng:-66},"VN":{lat:16,lng:106},"YE":{lat:15,lng:44},"ZM":{lat:-15,lng:28},"ZW":{lat:-20,lng:30},"PS":{lat:32,lng:35.3}};
+
+  el.innerHTML='<div id="amMapRoot" style="width:100%;height:560px;border-radius:16px;overflow:hidden;background:linear-gradient(145deg,#080c18 0%,#0f172a 40%,#0c1222 100%)"></div>';
+
+  function doBuild(){
+    try{
+      if(window._amRoot){try{window._amRoot.dispose()}catch(e){}}
+
+      var root=am5.Root.new("amMapRoot");
+      window._amRoot=root;
+      root.setThemes([am5themes_Animated.new(root)]);
+      root.interfaceColors.set("grid",am5.color("#1e293b"));
+
+      var chart=root.container.children.push(am5map.MapChart.new(root,{
+        panX:"rotateX",panY:"translateY",
+        projection:am5map.geoNaturalEarth1(),
+        homeZoomLevel:1.05,
+        homeGeoPoint:{longitude:25,latitude:15},
+        wheelY:"zoom"
+      }));
+
+      // Background
+      chart.chartContainer.set("background",am5.Rectangle.new(root,{fill:am5.color("#00000000")}));
+
+      // --- Polygon Series (countries) ---
+      var polygonSeries=chart.series.push(am5map.MapPolygonSeries.new(root,{
+        geoJSON:am5geodata_worldLow,
+        exclude:["AQ"]
+      }));
+
+      // Base styling
+      polygonSeries.mapPolygons.template.setAll({
+        fill:am5.color("#1a2236"),
+        stroke:am5.color("#0d1117"),
+        strokeWidth:0.4,
+        fillOpacity:0.85,
+        interactive:true
+      });
+
+      // Hover state
+      polygonSeries.mapPolygons.template.states.create("hover",{
+        fill:am5.color("#334155"),
+        fillOpacity:1,
+        stroke:am5.color("#94a3b8"),
+        strokeWidth:1.2
+      });
+
+      // Dynamic fill for active countries
+      polygonSeries.mapPolygons.template.adapters.add("fill",function(fill,target){
+        var id=target.dataItem.get("id");
+        var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});
+        if(nm&&countryData[nm]){
+          var d=countryData[nm];
+          if(d.signed>0)return am5.color("#10b981");
+          return am5.color("#2563eb");
+        }
+        return fill;
+      });
+
+      polygonSeries.mapPolygons.template.adapters.add("fillOpacity",function(op,target){
+        var id=target.dataItem.get("id");
+        var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});
+        return(nm&&countryData[nm])?1:0.5;
+      });
+
+      // Rich HTML Tooltip (hover only - summary)
+      var ttip=am5.Tooltip.new(root,{
+        getFillFromSprite:false,getLabelFillFromSprite:false,autoTextColor:false,
+        paddingLeft:0,paddingRight:0,paddingTop:0,paddingBottom:0,
+        pointerOrientation:"vertical"
+      });
+      ttip.get("background").setAll({fill:am5.color("#00000000"),strokeWidth:0});
+      polygonSeries.mapPolygons.template.set("tooltip",ttip);
+
+      polygonSeries.mapPolygons.template.adapters.add("tooltipHTML",function(html,target){
+        var id=target.dataItem.get("id");
+        var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});
+        if(!nm||!countryData[nm])return"";
+        var d=countryData[nm];var total=d.signed+d.pipeline;
+        var barW=total>0?Math.round(d.signed/total*100):0;
+        return '<div style="background:rgba(15,23,42,0.95);backdrop-filter:blur(12px);border:1px solid rgba(100,116,139,0.3);border-radius:14px;padding:16px 20px;min-width:220px;font-family:Outfit,sans-serif;box-shadow:0 8px 32px rgba(0,0,0,0.5)">'
+          +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+          +'<div style="width:8px;height:8px;border-radius:50%;background:'+(d.signed>0?"#10b981":"#3b82f6")+'"></div>'
+          +'<div style="font-size:15px;font-weight:800;color:#f1f5f9">'+nm+'</div>'
+          +'</div>'
+          +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+          +'<div style="background:rgba(16,185,129,0.1);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Signed</div><div style="font-size:16px;font-weight:800;color:#10b981">'+fmt(d.signed)+'</div></div>'
+          +'<div style="background:rgba(59,130,246,0.1);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Pipeline</div><div style="font-size:16px;font-weight:800;color:#3b82f6">'+fmt(d.pipeline)+'</div></div>'
+          +'</div>'
+          +'<div style="background:#1e293b;border-radius:6px;height:4px;overflow:hidden;margin-bottom:8px"><div style="height:100%;width:'+barW+'%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:6px"></div></div>'
+          +'<div style="font-size:11px;color:#94a3b8;text-align:center">'+d.deals+' deal'+(d.deals>1?"s":"")+' \u2022 Click for details</div>'
+          +'</div>';
+      });
+
+      // Click handler - opens detail panel with client list
+      polygonSeries.mapPolygons.template.events.on("click",function(ev){
+        var id=ev.target.dataItem.get("id");
+        var nm=Object.keys(nameToIso).find(function(k){return nameToIso[k]===id});
+        if(!nm||!countryData[nm])return;
+        openCountryPanel(nm,countryData[nm]);
+      });
+
+      // --- Pulsating Point Markers ---
+      var pointSeries=chart.series.push(am5map.MapPointSeries.new(root,{}));
+      var activeList=[];
+      Object.keys(countryData).forEach(function(nm){
+        var iso=nameToIso[nm];if(!iso||!coords[iso])return;
+        var d=countryData[nm];
+        activeList.push({name:nm,iso:iso,total:d.signed+d.pipeline,signed:d.signed,deals:d.deals,lat:coords[iso].lat,lng:coords[iso].lng});
+      });
+      activeList.sort(function(a,b){return b.total-a.total});
+
+      activeList.forEach(function(item,idx){
+        var di=pointSeries.pushDataItem({latitude:item.lat,longitude:item.lng});
+        var container=am5.Container.new(root,{});
+        var baseR=idx<3?9:idx<6?7:5;
+        var color=item.signed>0?am5.color("#10b981"):am5.color("#3b82f6");
+
+        // Outer glow
+        var glow=container.children.push(am5.Circle.new(root,{radius:baseR+6,fill:color,fillOpacity:0.12}));
+        // Main circle
+        var circ=container.children.push(am5.Circle.new(root,{
+          radius:baseR,fill:color,fillOpacity:0.9,
+          stroke:am5.color("#ffffff"),strokeWidth:2,strokeOpacity:0.8,
+          cursorOverStyle:"pointer",
+          tooltipText:item.name+"\n"+fmt(item.total)
+        }));
+
+        // Pulse animation for top 3
+        if(idx<3){
+          var pulse=container.children.push(am5.Circle.new(root,{radius:baseR,fill:color,fillOpacity:0}));
+          pulse.animate({key:"radius",to:baseR+18,duration:2000,loops:Infinity,easing:am5.ease.out(am5.ease.cubic)});
+          pulse.animate({key:"fillOpacity",from:0.35,to:0,duration:2000,loops:Infinity,easing:am5.ease.out(am5.ease.cubic)});
+        }
+
+        // Hover scale
+        circ.events.on("pointerover",function(){circ.animate({key:"scale",to:1.5,duration:200})});
+        circ.events.on("pointerout",function(){circ.animate({key:"scale",to:1,duration:200})});
+
+        di.set("bullet",am5.Bullet.new(root,{sprite:container}));
+      });
+
+      // --- Zoom Controls ---
+      var zc=chart.set("zoomControl",am5map.ZoomControl.new(root,{}));
+      zc.plusButton.setAll({fill:am5.color("#1e293b"),stroke:am5.color("#334155")});
+      zc.minusButton.setAll({fill:am5.color("#1e293b"),stroke:am5.color("#334155")});
+
+      // --- Legend ---
+      var legend=chart.children.push(am5.Container.new(root,{
+        layout:root.horizontalLayout,x:20,y:am5.percent(95),centerY:am5.percent(100)
+      }));
+      function addLeg(color,label){
+        var c=legend.children.push(am5.Container.new(root,{layout:root.horizontalLayout,paddingRight:16}));
+        c.children.push(am5.Circle.new(root,{radius:5,fill:am5.color(color),dy:1}));
+        c.children.push(am5.Label.new(root,{text:label,fill:am5.color("#94a3b8"),fontSize:11,paddingLeft:6}));
+      }
+      addLeg("#10b981","Signed");addLeg("#3b82f6","Pipeline");addLeg("#1a2236","No deals");
+
+      chart.appear(1000,100);
+    }catch(err){
+      console.error("Map error:",err);
+      document.getElementById("amMapRoot").innerHTML='<div style="padding:40px;text-align:center;color:#ef4444;font-family:var(--f)">Error: '+err.message+'</div>';
+    }
+  }
+
+  // Load or use cached
+  if(typeof am5!=="undefined"&&typeof am5map!=="undefined"&&typeof am5geodata_worldLow!=="undefined"){
+    setTimeout(doBuild,50);
+  } else {
+    document.getElementById("amMapRoot").innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#64748b;font-family:var(--f)"><div style="text-align:center"><div style="font-size:28px;margin-bottom:8px">\u{1F30D}</div>Loading map...</div></div>';
+    // Scripts are in <head>, just wait for them
+    var waits=0;
+    var wi=setInterval(function(){
+      waits++;
+      if(typeof am5!=="undefined"&&typeof am5map!=="undefined"&&typeof am5geodata_worldLow!=="undefined"){
+        clearInterval(wi);setTimeout(doBuild,50);
+      } else if(waits>50){
+        clearInterval(wi);
+        document.getElementById("amMapRoot").innerHTML='<div style="padding:40px;text-align:center;color:#ef4444;font-family:var(--f)">Failed to load map libraries</div>';
+      }
+    },200);
+  }
+}
+
+// ══════════════════════════════════════════
+// PAYMENTS (admin only)
+// ══════════════════════════════════════════
+function renderPayments(el){
+  var h='<h2 style="margin-bottom:16px">Vendor Payments</h2>';
+  // Add invoice form
+  var vendorOpts='<option value="">-- Select Vendor --</option>';
+  (D.expenses||[]).forEach(function(x){vendorOpts+='<option value="'+x.id+'">'+x.vendor+' ('+x.dept+')</option>'});
+  h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">New Invoice</div>';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:0 0 12px">';
+  h+='<div class="mf" style="min-width:200px"><label>Vendor</label><div style="display:flex;gap:4px"><select id="inv-vendor" style="flex:1">'+vendorOpts+'</select><button class="btn-ghost" id="btnNewVendor" style="padding:8px 10px;font-size:11px;white-space:nowrap">+ New</button></div></div>';
+  h+='<div class="mf" style="min-width:120px"><label>Invoice #</label><input id="inv-num" placeholder="INV-001"></div>';
+  h+='<div class="mf" style="min-width:100px"><label>Amount</label><input id="inv-amt" type="number" placeholder="5000"></div>';
+  h+='<div class="mf" style="min-width:80px"><label>Currency</label><select id="inv-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option></select></div>';
+  h+='<div class="mf" style="min-width:130px"><label>Due Date</label><input id="inv-due" type="date"></div>';
+  h+='<div class="mf" style="min-width:150px"><label>Notes</label><input id="inv-notes" placeholder="Optional"></div>';
+  h+='<button class="btn-p" id="btnAddInv" style="padding:10px 18px;white-space:nowrap">+ Add Invoice</button>';
+  h+='</div></div>';
+
+  // KPIs
+  h+='<div id="invKpis"></div>';
+  // Table
+  h+='<div class="tw"><div class="tw-h">Invoices</div>';
+  h+='<div style="overflow-x:auto;max-height:500px"><table><thead><tr>';
+  h+='<th>Vendor</th><th>Invoice #</th><th>Amount</th><th>Cur</th><th>Due Date</th>';
+  h+='<th>Vendor Unpaid</th><th>Paid Amount</th><th>Paid Date</th><th>Remaining</th><th>Status</th><th></th>';
+  h+='</tr></thead><tbody id="invTbl"></tbody></table></div></div>';
+  el.innerHTML=h;
+
+  // Load invoices
+  authFetch('/api/invoices').then(function(r){return r.json()}).then(function(invoices){
+    var rate=D.exchangeRate||3.12;
+    // KPIs
+    var totalUnpaid=0,totalPaid=0,countPending=0;
+    invoices.forEach(function(inv){
+      var amtUsd=inv.currency==='ILS'?inv.amount/rate:inv.amount;
+      var paidUsd=inv.currency==='ILS'?inv.paidAmount/rate:inv.paidAmount;
+      if(inv.status!=='paid') totalUnpaid+=amtUsd-paidUsd;
+      totalPaid+=paidUsd;
+      if(inv.status==='pending') countPending++;
+    });
+    document.getElementById('invKpis').innerHTML='<div class="kg kg4" style="margin-bottom:16px">'+
+      kpi('\u2709','Total Invoices',''+invoices.length,'all time','var(--ac)')+
+      kpi('\u23F3','Pending',''+countPending,'unpaid','var(--am)',50)+
+      kpi('\u2717','Unpaid Total',fmt(totalUnpaid),'outstanding','var(--rd)',100)+
+      kpi('\u2714','Total Paid',fmt(totalPaid),'completed','var(--gn)',150)+
+    '</div>';
+
+    // Table rows
+    var statusColors={pending:'var(--am)',partial:'var(--cy)',paid:'var(--gn)',overdue:'var(--rd)'};
+    var rows='';
+    invoices.forEach(function(inv){
+      var sc=statusColors[inv.status]||'var(--txM)';
+      var sym=inv.currency==='ILS'?'\u20AA':'$';
+      rows+='<tr class="clickrow" data-iid="'+inv.id+'">';
+      rows+='<td style="font-weight:600">'+inv.vendor+'</td>';
+      rows+='<td class="mono">'+(inv.invoiceNumber||'\u2014')+'</td>';
+      rows+='<td class="mono" style="font-weight:700">'+sym+Math.round(inv.amount).toLocaleString()+'</td>';
+      rows+='<td style="font-size:10px;font-weight:700;color:'+(inv.currency==='ILS'?'var(--am)':'var(--gn)')+'">'+inv.currency+'</td>';
+      rows+='<td style="color:var(--txD);font-size:12px">'+(inv.dueDate||'\u2014')+'</td>';
+      rows+='<td class="mono" style="color:var(--rd)">'+fmt(inv.vendorUnpaidTotal)+'</td>';
+      rows+='<td class="mono" style="color:var(--gn)">'+sym+(inv.paidAmount?Math.round(inv.paidAmount).toLocaleString():'0')+'</td>';
+      rows+='<td style="color:var(--txD);font-size:12px">'+(inv.paidDate||'\u2014')+'</td>';
+      rows+='<td class="mono" style="font-weight:700;color:'+(inv.remaining>0?'var(--am)':'var(--gn)')+'">'+sym+Math.round(inv.remaining).toLocaleString()+'</td>';
+      rows+='<td><span class="pill" style="background:'+sc+'18;color:'+sc+'">'+inv.status+'</span></td>';
+      if(inv.status!=='paid'){
+        rows+='<td><button class="btn-p inv-pay" data-iid="'+inv.id+'" style="padding:4px 10px;font-size:10px">Pay</button> ';
+        rows+='<button class="btn-ghost inv-edit" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px">\u270E</button></td>';
+      } else {
+        rows+='<td><button class="btn-ghost inv-edit" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px">\u270E</button></td>';
+      }
+      rows+='</tr>';
+    });
+    document.getElementById('invTbl').innerHTML=rows;
+    makeSearchable('invTbl');
+
+    // Click to edit
+    document.querySelectorAll('.inv-edit').forEach(function(btn){
+      btn.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        var inv=invoices.find(function(x){return x.id===btn.dataset.iid});
+        if(inv) openInvoiceCard(inv);
+      });
+    });
+
+    // Quick pay button
+    document.querySelectorAll('.inv-pay').forEach(function(btn){
+      btn.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        var inv=invoices.find(function(x){return x.id===btn.dataset.iid});
+        if(!inv) return;
+        var sym=inv.currency==='ILS'?'\u20AA':inv.currency==='EUR'?'\u20AC':'$';
+        var remaining=inv.amount-inv.paidAmount;
+        var payHtml='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:420px">';
+        payHtml+='<div class="modal-head"><h2>Pay '+inv.vendor+'</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+        payHtml+='<div class="modal-body">';
+        payHtml+='<div style="font-size:13px;color:var(--txD);margin-bottom:12px">Invoice '+(inv.invoiceNumber||'#')+' \u2014 '+sym+Math.round(inv.amount).toLocaleString()+' (remaining: '+sym+Math.round(remaining).toLocaleString()+')</div>';
+        payHtml+='<div class="modal-grid">';
+        payHtml+='<div class="mf"><label>Payment Amount ('+inv.currency+')</label><input id="qp-amt" type="number" value="'+remaining+'"></div>';
+        payHtml+='<div class="mf"><label>Payment Date</label><input id="qp-date" type="date" value="'+new Date().toISOString().split("T")[0]+'"></div>';
+        payHtml+='</div></div>';
+        payHtml+='<div class="modal-foot"><button class="btn-ghost" id="qpX">Cancel</button><button class="btn-p" id="qpSave">Record Payment</button></div></div></div>';
+        document.body.insertAdjacentHTML('beforeend',payHtml);
+        document.getElementById('modalClose').addEventListener('click',closeModal);
+        document.getElementById('qpX').addEventListener('click',closeModal);
+        document.getElementById('modalOverlay').addEventListener('click',function(e2){if(e2.target===this)closeModal()});
+        document.getElementById('qpSave').addEventListener('click',function(){
+          var pAmt=parseFloat(document.getElementById('qp-amt').value)||0;
+          var pDate=document.getElementById('qp-date').value;
+          var totalPaid=inv.paidAmount+pAmt;
+          authFetch('/api/invoices/'+inv.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            paidAmount:totalPaid,paidDate:pDate
+          })}).then(function(r){return r.json()}).then(function(res){
+            if(res.ok){closeModal();toast('Payment recorded');renderPayments(el)}
+          });
+        });
+      });
+    });
+  });
+
+  // Add invoice handler
+  document.getElementById('btnAddInv').addEventListener('click',function(){
+    var eid=document.getElementById('inv-vendor').value;
+    var amt=parseFloat(document.getElementById('inv-amt').value);
+    if(!eid||!amt){toast('Select vendor and amount');return}
+    authFetch('/api/invoices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      expenseId:eid,
+      invoiceNumber:document.getElementById('inv-num').value,
+      amount:amt,
+      currency:document.getElementById('inv-cur').value,
+      dueDate:document.getElementById('inv-due').value||null,
+      notes:document.getElementById('inv-notes').value
+    })}).then(function(r){return r.json()}).then(function(res){
+      if(res.ok){toast('Invoice added');renderPayments(el)}
+    });
+  });
+
+  // New vendor quick-add
+  document.getElementById('btnNewVendor').addEventListener('click',function(){
+    var nvHtml='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:420px">';
+    nvHtml+='<div class="modal-head"><h2>New Vendor</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+    nvHtml+='<div class="modal-body"><div class="modal-grid">';
+    nvHtml+='<div class="mf"><label>Vendor Name *</label><input id="nv-name" placeholder="e.g. AWS"></div>';
+    nvHtml+='<div class="mf"><label>Department</label><select id="nv-dept"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    nvHtml+='<div class="mf"><label>Monthly Amount</label><input id="nv-amt" type="number" placeholder="0"></div>';
+    nvHtml+='<div class="mf"><label>COGS?</label><select id="nv-cogs"><option value="false">No - OpEx</option><option value="true">Yes - COGS</option></select></div>';
+    nvHtml+='</div></div>';
+    nvHtml+='<div class="modal-foot"><button class="btn-ghost" id="nvX">Cancel</button><button class="btn-p" id="nvSave">Add Vendor</button></div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',nvHtml);
+    document.getElementById('modalClose').addEventListener('click',closeModal);
+    document.getElementById('nvX').addEventListener('click',closeModal);
+    document.getElementById('modalOverlay').addEventListener('click',function(e2){if(e2.target===this)closeModal()});
+    document.getElementById('nvSave').addEventListener('click',function(){
+      var name=document.getElementById('nv-name').value;
+      if(!name){toast('Enter vendor name');return}
+      authFetch('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        vendor:name,department:document.getElementById('nv-dept').value,
+        monthlyAmount:parseFloat(document.getElementById('nv-amt').value)||0,
+        isCogs:document.getElementById('nv-cogs').value==='true'
+      })}).then(function(r){return r.json()}).then(function(res){
+        if(res.ok){closeModal();toast('Vendor added');loadAll().then(function(){renderPayments(el)})}
+      });
+    });
+  });
+}
+
+function openInvoiceCard(inv){
+  var sym=inv.currency==='ILS'?'\u20AA':inv.currency==='EUR'?'\u20AC':'$';
+  var h='<div class="modal-bg" id="modalOverlay"><div class="modal-card">';
+  h+='<div class="modal-head"><h2>'+inv.vendor+' <span class="mono" style="font-size:14px;color:var(--txD)">'+(inv.invoiceNumber||'No #')+'</span></h2>';
+  h+='<button class="modal-close" id="modalClose">\u2715</button></div>';
+  h+='<div class="modal-body">';
+  h+='<div class="kpi-row">';
+  h+='<div class="kpi-mini"><div class="kv">'+sym+Math.round(inv.amount).toLocaleString()+'</div><div class="kl">Invoice Amount</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:var(--gn)">'+sym+(inv.paidAmount?Math.round(inv.paidAmount).toLocaleString():'0')+'</div><div class="kl">Paid</div></div>';
+  h+='<div class="kpi-mini"><div class="kv" style="color:'+(inv.remaining>0?'var(--am)':'var(--gn)')+'">'+sym+Math.round(inv.remaining).toLocaleString()+'</div><div class="kl">Remaining</div></div>';
+  h+='</div>';
+
+  h+='<div class="section-label">Invoice Details</div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Invoice Number</label><input id="iv-num" value="'+(inv.invoiceNumber||'')+'"></div>';
+  h+='<div class="mf"><label>Amount</label><input id="iv-amt" type="number" value="'+inv.amount+'"></div>';
+  h+='<div class="mf"><label>Currency</label><select id="iv-cur">';
+  h+='<option value="ILS"'+(inv.currency==='ILS'?' selected':'')+'>\u20AA ILS</option>';
+  h+='<option value="USD"'+(inv.currency==='USD'?' selected':'')+'>$ USD</option><option value="EUR"'+(inv.currency==='EUR'?' selected':'')+'>€ EUR</option>';
+  h+='</select></div>';
+  h+='<div class="mf"><label>Due Date</label><input id="iv-due" type="date" value="'+(inv.dueDate||'')+'"></div>';
+  h+='</div>';
+
+  h+='<div class="modal-sep"></div>';
+  h+='<div class="section-label">Payment</div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Paid Amount</label><input id="iv-paid" type="number" value="'+(inv.paidAmount||0)+'"></div>';
+  h+='<div class="mf"><label>Paid Date</label><input id="iv-pdate" type="date" value="'+(inv.paidDate||'')+'"></div>';
+  h+='<div class="mf"><label>Status</label><select id="iv-status">';
+  h+='<option value="pending"'+(inv.status==='pending'?' selected':'')+'>Pending</option>';
+  h+='<option value="partial"'+(inv.status==='partial'?' selected':'')+'>Partial</option>';
+  h+='<option value="paid"'+(inv.status==='paid'?' selected':'')+'>Paid</option>';
+  h+='<option value="overdue"'+(inv.status==='overdue'?' selected':'')+'>Overdue</option>';
+  h+='</select></div>';
+  h+='<div class="mf"><label>Notes</label><input id="iv-notes" value="'+(inv.notes||'')+'"></div>';
+  h+='</div>';
+
+  h+='</div>';
+  h+='<div class="modal-foot"><button class="btn-d" id="ivDel">Delete</button>';
+  h+='<button class="btn-ghost" id="ivX">Cancel</button>';
+  h+='<button class="btn-p" id="ivSave">Save</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('ivX').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+
+  document.getElementById('ivDel').addEventListener('click',function(){
+    if(!confirm('Delete this invoice?'))return;
+    authFetch('/api/invoices/'+inv.id,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){
+      if(res.ok){closeModal();toast('Deleted');var c=document.getElementById('content');if(c)renderPayments(c)}
+    });
+  });
+
+  document.getElementById('ivSave').addEventListener('click',function(){
+    authFetch('/api/invoices/'+inv.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      invoiceNumber:document.getElementById('iv-num').value,
+      amount:parseFloat(document.getElementById('iv-amt').value),
+      currency:document.getElementById('iv-cur').value,
+      dueDate:document.getElementById('iv-due').value||null,
+      paidAmount:parseFloat(document.getElementById('iv-paid').value)||0,
+      paidDate:document.getElementById('iv-pdate').value||null,
+      status:document.getElementById('iv-status').value,
+      notes:document.getElementById('iv-notes').value
+    })}).then(function(r){return r.json()}).then(function(res){
+      if(res.ok){toast('Updated');closeModal();var c=document.getElementById('content');if(c)renderPayments(c)}
+    });
+  });
+}
+
 function renderSettings(el){
   var h='<div class="subtabs" id="setTabs"><button class="stab act" data-st="scon">Contracts</button><button class="stab" data-st="semp">Employees</button><button class="stab" data-st="sexp">Expenses</button></div>';
   h+='<div class="stab-content act" id="st-scon"></div><div class="stab-content" id="st-semp"></div><div class="stab-content" id="st-sexp"></div>';
@@ -728,10 +1250,12 @@ function renderSettings(el){
   var cr='';D.contracts.forEach(function(c){var stC={'Signed':'var(--gn)','Negotiation':'var(--am)','Demo':'var(--ac)'}[c.stage]||'var(--txM)';cr+='<tr class="clickrow" data-cid="'+c.id+'"><td style="font-weight:600">'+c.client+'</td><td><span class="pill" style="background:'+stC+'18;color:'+stC+'">'+c.stage+'</span></td><td class="mono" style="font-weight:700">'+fmt(c.value)+'</td><td style="color:var(--txD);font-size:11px">'+(c.salespersonName||'\u2014')+'</td><td class="updated-tag">'+fmtDate(c.updatedAt)+'</td></tr>'});
   document.getElementById('setCRows').innerHTML=cr;
   makeSearchable('setCRows');
+  makeCountrySelect('fc-co','');
   document.querySelectorAll('#setCRows .clickrow').forEach(function(r){r.addEventListener('click',function(){var c=D.contracts.find(function(x){return x.id===r.dataset.cid});if(c)openContractCard(c)})});
   // Employee + Expense (simplified)
   // Employee table - clickable
-  var empHtml='<div class="tw"><div class="tw-h">Employees</div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Dept</th><th>Position %</th><th>Gross (USD)</th><th>Cur</th><th>Labor (USD)</th></tr></thead><tbody id="setEmpTbl">';
+  // Employee table with Add button
+  var empHtml='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Employees <button class="btn-p" id="btnAddEmp" style="padding:6px 14px;font-size:11px">+ Add Employee</button></div><div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Dept</th><th>Position %</th><th>Gross (USD)</th><th>Cur</th><th>Labor (USD)</th></tr></thead><tbody id="setEmpTbl">';
   empHtml+=D.employees.map(function(e){
     var cur=e.currency||'ILS';
     var rate=D.exchangeRate||3.12;
@@ -743,8 +1267,8 @@ function renderSettings(el){
   makeSearchable('setEmpTbl');
   document.querySelectorAll('#setEmpTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var e=D.employees.find(function(x){return x.id===r.dataset.eid});if(e)openEmployeeCard(e)})});
 
-  // Expense table - clickable
-  var expHtml='<div class="tw"><div class="tw-h">Expenses</div><div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Service</th><th>Dept</th><th>Amount</th><th>Freq</th><th>Type</th></tr></thead><tbody id="setExpTbl">';
+  // Expense table with Add button
+  var expHtml='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Expenses <button class="btn-p" id="btnAddExp" style="padding:6px 14px;font-size:11px">+ Add Vendor</button></div><div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Service</th><th>Dept</th><th>Amount</th><th>Freq</th><th>Type</th></tr></thead><tbody id="setExpTbl">';
   var freqLabels={monthly:'Monthly',bimonthly:'Bi-Monthly',quarterly:'Quarterly',semi_annual:'Semi-Annual',annual:'Annual'};
   expHtml+=D.expenses.map(function(x){
     return '<tr class="clickrow" data-xid="'+x.id+'"><td style="font-weight:600">'+x.vendor+'</td><td style="color:var(--txD);font-size:11px">'+(x.serviceDesc||x.subCat||'\u2014')+'</td><td><span class="pill" style="background:var(--tl)18;color:var(--tl)">'+x.dept+'</span></td><td class="mono">'+fmt(x.amount)+'/mo</td><td style="font-size:11px;color:var(--txD)">'+(freqLabels[x.frequency]||'Monthly')+'</td><td>'+(x.isCogs?'<span class="cogs-badge">COGS</span>':'OpEx')+'</td></tr>';
@@ -753,6 +1277,67 @@ function renderSettings(el){
   document.getElementById('st-sexp').innerHTML=expHtml;
   makeSearchable('setExpTbl');
   document.querySelectorAll('#setExpTbl .clickrow').forEach(function(r){r.addEventListener('click',function(){var x=D.expenses.find(function(e){return e.id===r.dataset.xid});if(x)openExpenseCard(x)})});
+
+  // Add Employee button
+  document.getElementById('btnAddEmp').addEventListener('click',function(){
+    var ah='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+    ah+='<div class="modal-head"><h2>New Employee</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+    ah+='<div class="modal-body"><div class="modal-grid">';
+    ah+='<div class="mf"><label>Full Name *</label><input id="ae-nm" placeholder="John Doe"></div>';
+    ah+='<div class="mf"><label>Department</label><select id="ae-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    ah+='<div class="mf"><label>Gross Salary</label><input id="ae-gr" type="number" placeholder="15000"></div>';
+    ah+='<div class="mf"><label>Currency</label><select id="ae-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
+    ah+='<div class="mf"><label>Position %</label><input id="ae-pp" type="number" value="100" min="0" max="100"></div>';
+    ah+='<div class="mf"><label>Hire Date</label><input id="ae-hd" type="date" value="'+new Date().toISOString().split('T')[0]+'"></div>';
+    ah+='</div></div>';
+    ah+='<div class="modal-foot"><button class="btn-ghost" id="aeX">Cancel</button><button class="btn-p" id="aeSave">Add Employee</button></div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',ah);
+    document.getElementById('modalClose').addEventListener('click',closeModal);
+    document.getElementById('aeX').addEventListener('click',closeModal);
+    document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+    document.getElementById('aeSave').addEventListener('click',function(){
+      var nm=document.getElementById('ae-nm').value;
+      var gr=parseFloat(document.getElementById('ae-gr').value);
+      if(!nm){toast('Enter name');return}
+      authFetch('/api/employees',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        name:nm,department:document.getElementById('ae-dp').value,
+        gross:gr||0,hireDate:document.getElementById('ae-hd').value
+      })}).then(function(r){return r.json()}).then(function(res){
+        if(res.ok){closeModal();toast('Employee added');loadAll().then(function(){renderSettings(el)})}
+      });
+    });
+  });
+
+  // Add Vendor button
+  document.getElementById('btnAddExp').addEventListener('click',function(){
+    var ah='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+    ah+='<div class="modal-head"><h2>New Vendor / Expense</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+    ah+='<div class="modal-body"><div class="modal-grid">';
+    ah+='<div class="mf"><label>Vendor Name *</label><input id="ax-vn" placeholder="e.g. AWS"></div>';
+    ah+='<div class="mf"><label>Department</label><select id="ax-dp"><option>R&D</option><option>S&M</option><option>G&A</option><option>Training</option></select></div>';
+    ah+='<div class="mf"><label>Monthly Amount</label><input id="ax-am" type="number" placeholder="5000"></div>';
+    ah+='<div class="mf"><label>Currency</label><select id="ax-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
+    ah+='<div class="mf"><label>Service Description</label><input id="ax-sd" placeholder="Cloud hosting"></div>';
+    ah+='<div class="mf"><label>COGS?</label><select id="ax-cg"><option value="false">No - OpEx</option><option value="true">Yes - COGS</option></select></div>';
+    ah+='</div></div>';
+    ah+='<div class="modal-foot"><button class="btn-ghost" id="axX">Cancel</button><button class="btn-p" id="axSave">Add Vendor</button></div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',ah);
+    document.getElementById('modalClose').addEventListener('click',closeModal);
+    document.getElementById('axX').addEventListener('click',closeModal);
+    document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+    document.getElementById('axSave').addEventListener('click',function(){
+      var vn=document.getElementById('ax-vn').value;
+      if(!vn){toast('Enter vendor name');return}
+      authFetch('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        vendor:vn,department:document.getElementById('ax-dp').value,
+        monthlyAmount:parseFloat(document.getElementById('ax-am').value)||0,
+        isCogs:document.getElementById('ax-cg').value==='true',
+        serviceDesc:document.getElementById('ax-sd').value
+      })}).then(function(r){return r.json()}).then(function(res){
+        if(res.ok){closeModal();toast('Vendor added');loadAll().then(function(){renderSettings(el)})}
+      });
+    });
+  });
 }
 
 // ══════════════════════════════════════════
@@ -982,6 +1567,7 @@ function openContractCard(c){
   h+='</div></div></div>';
 
   document.body.insertAdjacentHTML('beforeend',h);
+  makeCountrySelect('mc-co',c.country||'');
   document.getElementById('modalClose').addEventListener('click',closeModal);
   document.getElementById('mcX').addEventListener('click',closeModal);
   document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal()});
@@ -1125,7 +1711,7 @@ function openExpenseCard(x){
   h+='<div class="modal-grid">';
   h+='<div class="mf"><label>Currency</label><select id="mx-cur">';
   h+='<option value="ILS"'+(xCur==='ILS'?' selected':'')+'>\u20AA ILS (Shekel)</option>';
-  h+='<option value="USD"'+(xCur==='USD'?' selected':'')+'>$ USD (Dollar)</option>';
+  h+='<option value="USD"'+(xCur==='USD'?' selected':'')+'>$ USD (Dollar)</option><option value="EUR"'+(xCur==='EUR'?' selected':'')+'>€ EUR (Euro)</option>';
   h+='</select></div>';
   h+='<div class="mf"><label>Amount</label><input id="mx-am" type="number" value="'+(x.amountOriginal||x.amount)+'"></div>';
   h+='<div class="mf"><label>Frequency</label><select id="mx-fr">';
@@ -1198,7 +1784,7 @@ function openEmployeeCard(e){
   h+='<option'+(e.dept==='Training'?' selected':'')+'>Training</option></select></div>';
   h+='<div class="mf"><label>Currency</label><select id="me-cur">';
   h+='<option value="ILS"'+(cur==='ILS'?' selected':'')+'>\u20AA ILS (Shekel)</option>';
-  h+='<option value="USD"'+(cur==='USD'?' selected':'')+'>$ USD (Dollar)</option>';
+  h+='<option value="USD"'+(cur==='USD'?' selected':'')+'>$ USD (Dollar)</option><option value="EUR"'+(cur==='EUR'?' selected':'')+'>€ EUR (Euro)</option>';
   h+='</select></div>';
   h+='<div class="mf"><label>Gross Salary</label><input id="me-gr" type="number" value="'+e.gross+'"></div>';
   h+='<div class="mf"><label>Position %</label><input id="me-pp" type="number" value="'+pct+'" min="0" max="100"></div>';

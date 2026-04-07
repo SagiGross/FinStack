@@ -93,6 +93,20 @@ def init_db():
             vendor_phone TEXT DEFAULT '', service_desc TEXT DEFAULT '',
             frequency TEXT DEFAULT 'monthly'
         );
+        CREATE TABLE IF NOT EXISTS invoices (
+            id TEXT PRIMARY KEY,
+            expense_id TEXT NOT NULL,
+            invoice_number TEXT DEFAULT '',
+            amount REAL NOT NULL DEFAULT 0,
+            currency TEXT DEFAULT 'ILS',
+            due_date TEXT,
+            paid_date TEXT,
+            paid_amount REAL DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            notes TEXT DEFAULT '',
+            created_at TEXT,
+            FOREIGN KEY (expense_id) REFERENCES expenses(id)
+        );
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT, entity_id TEXT,
             field TEXT, old_value TEXT, new_value TEXT, changed_by TEXT, changed_at TEXT
@@ -161,11 +175,37 @@ def lock_past_months():
                 elif not existing["locked"]:
                     db.execute("UPDATE monthly_rates SET locked=1 WHERE month=?", (m,))
 
+def get_eur_rate():
+    """Get EUR/USD rate. Try cached, then live."""
+    with get_db() as db:
+        r = db.execute("SELECT value FROM app_settings WHERE key='eur_usd_rate'").fetchone()
+        stored = float(r["value"]) if r else 1.08
+    import time as _t2
+    with get_db() as db:
+        cache = db.execute("SELECT value FROM app_settings WHERE key='eur_cache_time'").fetchone()
+        ct = float(cache["value"]) if cache else 0
+    if _t2.time() - ct < 3600: return stored
+    try:
+        import urllib.request
+        req = urllib.request.Request("https://api.frankfurter.app/latest?from=EUR&to=USD",
+                                     headers={"User-Agent":"FinStack/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            rate = data["rates"]["USD"]  # 1 EUR = X USD
+            with get_db() as db:
+                db.execute("INSERT OR REPLACE INTO app_settings VALUES ('eur_usd_rate',?)", (str(rate),))
+                db.execute("INSERT OR REPLACE INTO app_settings VALUES ('eur_cache_time',?)", (str(_t2.time()),))
+            return rate
+    except:
+        return stored
+
 def to_usd(amount, currency, month_str=None):
     if currency == 'USD' or not currency: return amount
     if currency == 'ILS':
         rate = get_rate_for_month(month_str) if month_str else get_exchange_rate()
         return amount / rate
+    if currency == 'EUR':
+        return amount * get_eur_rate()
     return amount
 
 def is_seeded():
@@ -746,6 +786,104 @@ class MonthRateLock(BaseModel):
 def lock_month_rate(b: MonthRateLock, user=Depends(require_admin)):
     with get_db() as db:
         db.execute("INSERT OR REPLACE INTO monthly_rates (month, rate, locked) VALUES (?,?,1)", (b.month, b.rate))
+    return {"ok": True}
+
+# ══════════════════════════════════════════
+# INVOICES (Vendor Payments)
+# ══════════════════════════════════════════
+@app.get("/api/invoices")
+def get_invoices(user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT i.*, e.vendor, e.dept FROM invoices i
+            JOIN expenses e ON i.expense_id = e.id
+            ORDER BY i.due_date DESC
+        """).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        result.append({
+            "id": d["id"], "expenseId": d["expense_id"],
+            "vendor": d["vendor"], "dept": d["dept"],
+            "invoiceNumber": d["invoice_number"],
+            "amount": d["amount"], "currency": d["currency"],
+            "dueDate": d["due_date"], "paidDate": d["paid_date"],
+            "paidAmount": d["paid_amount"], "status": d["status"],
+            "notes": d["notes"], "createdAt": d["created_at"]
+        })
+    # Compute vendor totals (unpaid)
+    vendor_totals = {}
+    for inv in result:
+        v = inv["vendor"]
+        if v not in vendor_totals:
+            vendor_totals[v] = 0
+        if inv["status"] != 'paid':
+            vendor_totals[v] += to_usd(inv["amount"], inv["currency"])
+    for inv in result:
+        inv["vendorUnpaidTotal"] = round(vendor_totals.get(inv["vendor"], 0), 2)
+        remaining = inv["amount"] - inv["paidAmount"]
+        inv["remaining"] = round(remaining, 2)
+        inv["remainingUsd"] = round(to_usd(remaining, inv["currency"]), 2)
+    return result
+
+class InvoiceIn(BaseModel):
+    expenseId: str
+    invoiceNumber: str = ""
+    amount: float
+    currency: str = "ILS"
+    dueDate: Optional[str] = None
+    notes: str = ""
+
+@app.post("/api/invoices")
+def add_invoice(b: InvoiceIn, user=Depends(require_admin)):
+    iid = str(uuid4())[:8]
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("""INSERT INTO invoices (id, expense_id, invoice_number, amount, currency, due_date, status, notes, created_at)
+                      VALUES (?,?,?,?,?,?,?,?,?)""",
+                   (iid, b.expenseId, b.invoiceNumber, b.amount, b.currency, b.dueDate, "pending", b.notes, now))
+    return {"ok": True, "id": iid}
+
+class InvoiceUpdate(BaseModel):
+    invoiceNumber: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    dueDate: Optional[str] = None
+    paidDate: Optional[str] = None
+    paidAmount: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+@app.put("/api/invoices/{iid}")
+def upd_invoice(iid: str, b: InvoiceUpdate, user=Depends(require_admin)):
+    fields = []; vals = []
+    if b.invoiceNumber is not None: fields.append("invoice_number=?"); vals.append(b.invoiceNumber)
+    if b.amount is not None: fields.append("amount=?"); vals.append(b.amount)
+    if b.currency is not None: fields.append("currency=?"); vals.append(b.currency)
+    if b.dueDate is not None: fields.append("due_date=?"); vals.append(b.dueDate)
+    if b.paidDate is not None: fields.append("paid_date=?"); vals.append(b.paidDate if b.paidDate else None)
+    if b.paidAmount is not None: fields.append("paid_amount=?"); vals.append(b.paidAmount)
+    if b.status is not None: fields.append("status=?"); vals.append(b.status)
+    if b.notes is not None: fields.append("notes=?"); vals.append(b.notes)
+    # Auto-set status based on payment
+    if b.paidAmount is not None and b.paidAmount > 0:
+        with get_db() as db:
+            row = db.execute("SELECT amount FROM invoices WHERE id=?", (iid,)).fetchone()
+            if row:
+                if b.paidAmount >= row["amount"]:
+                    fields.append("status=?"); vals.append("paid")
+                else:
+                    fields.append("status=?"); vals.append("partial")
+    if not fields: return {"ok": True}
+    vals.append(iid)
+    with get_db() as db:
+        db.execute(f"UPDATE invoices SET {','.join(fields)} WHERE id=?", vals)
+    return {"ok": True}
+
+@app.delete("/api/invoices/{iid}")
+def del_invoice(iid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM invoices WHERE id=?", (iid,))
     return {"ok": True}
 
 # ══════════════════════════════════════════
