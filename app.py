@@ -82,6 +82,7 @@ def init_db():
             contact_name TEXT DEFAULT '', contact_phone TEXT DEFAULT '',
             contact_email TEXT DEFAULT '', contact_linkedin TEXT DEFAULT '',
             payment_splits TEXT DEFAULT '[]',
+            payment_method TEXT DEFAULT '',
             created_at TEXT, updated_at TEXT,
             FOREIGN KEY (salesperson_id) REFERENCES users(id)
         );
@@ -91,7 +92,8 @@ def init_db():
             currency TEXT DEFAULT 'ILS',
             vendor_contact TEXT DEFAULT '', vendor_email TEXT DEFAULT '',
             vendor_phone TEXT DEFAULT '', service_desc TEXT DEFAULT '',
-            frequency TEXT DEFAULT 'monthly'
+            frequency TEXT DEFAULT 'monthly',
+            payment_method TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS invoices (
             id TEXT PRIMARY KEY,
@@ -108,11 +110,20 @@ def init_db():
             FOREIGN KEY (expense_id) REFERENCES expenses(id)
         );
         CREATE TABLE IF NOT EXISTS bank_balances (
-            month TEXT PRIMARY KEY,
+            month TEXT,
+            bank TEXT DEFAULT 'total',
             opening_balance REAL,
             closing_balance REAL,
             is_manual INTEGER DEFAULT 0,
-            notes TEXT DEFAULT ''
+            notes TEXT DEFAULT '',
+            PRIMARY KEY (month, bank)
+        );
+        CREATE TABLE IF NOT EXISTS payment_methods (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            bank_group TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT, entity_id TEXT,
@@ -286,6 +297,14 @@ def seed_db():
             db.execute("INSERT OR IGNORE INTO expenses (id,dept,vendor,sub_cat,is_cogs,amounts) VALUES (?,?,?,?,?,?)",
                        (eid,dept,vendor,sub,cogs,json.dumps(amounts)))
 
+        # Seed default payment methods
+        pms = [
+            ("pm_mizrachi", "Bank Mizrachi", "mizrachi", 1, 1),
+            ("pm_yahav", "Bank Yahav", "yahav", 1, 2),
+            ("pm_cc_mizrachi", "Credit Card (Mizrachi)", "mizrachi", 1, 3),
+        ]
+        db.executemany("INSERT OR IGNORE INTO payment_methods (id, name, bank_group, is_active, sort_order) VALUES (?,?,?,?,?)", pms)
+
 # ══════════════════════════════════════════
 # AUTH
 # ══════════════════════════════════════════
@@ -396,7 +415,7 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
         for x in expenses:
             a=to_usd(x["amounts"].get(ml,0), x.get("currency","ILS"), ml)
             vd[x["dept"]]+=a
-            if x["is_cogs"]: vc+=a
+            if x["is_cogs"] == 1: vc+=a
             else: vo+=a
         cogs=lab["R&D"]+vc; opex=(sum(lab.values())-lab["R&D"])+vo
         data.append({"month":ml[:2],"lab":{k:round(v,2) for k,v in lab.items()},"vd":{k:round(v,2) for k,v in vd.items()},"cogs":round(cogs,2),"opex":round(opex,2),"totalExp":round(cogs+opex,2),"revenue":0.0,"cashIn":0.0})
@@ -472,6 +491,7 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "contactName":c.get("contact_name",""),"contactPhone":c.get("contact_phone",""),
          "contactEmail":c.get("contact_email",""),"contactLinkedin":c.get("contact_linkedin",""),
          "paymentSplits":json.loads(c.get("payment_splits","[]")) if c.get("payment_splits") else [],
+         "paymentMethod":c.get("payment_method",""),
          "createdAt":c["created_at"],"updatedAt":c["updated_at"]} for c in contracts]
     es=[{"id":e["id"],"name":e["name"],"dept":e["dept"],"gross":e["gross"],
          "positionPct":e.get("position_pct",100),"bonus":e.get("bonus",0),
@@ -479,17 +499,22 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "laborCost":round(to_usd((e["gross"]+e.get("bonus",0))*ECF*(e.get("position_pct",100)/100.0), e.get("currency","ILS")),2),
          "hireDate":e["hire_date"],"termDate":e["term_date"]} for e in employees]
     xs=[{"id":x["id"],"dept":x["dept"],"vendor":x["vendor"],"subCat":x["sub_cat"],
-         "isCogs":bool(x["is_cogs"]),"currency":x.get("currency","ILS"),
+         "isCogs":x["is_cogs"]==1,"expenseType":["OpEx","COGS","CapEx"][min(x["is_cogs"],2)],"currency":x.get("currency","ILS"),
          "amount":round(to_usd(sum(x["amounts"].values())/max(len(x["amounts"]),1), x.get("currency","ILS")),2),
          "amountOriginal":round(sum(x["amounts"].values())/max(len(x["amounts"]),1),2),
          "vendorContact":x.get("vendor_contact",""),"vendorEmail":x.get("vendor_email",""),
          "vendorPhone":x.get("vendor_phone",""),"serviceDesc":x.get("service_desc",""),
-         "frequency":x.get("frequency","monthly")} for x in expenses]
+         "frequency":x.get("frequency","monthly"),
+         "paymentMethod":x.get("payment_method","")} for x in expenses]
     sp=load_salespeople()
     rate=get_exchange_rate()
+    # Load payment methods
+    with get_db() as db:
+        pm_rows = db.execute("SELECT * FROM payment_methods WHERE is_active=1 ORDER BY sort_order").fetchall()
+    pms = [{"id":p["id"],"name":p["name"],"bankGroup":p["bank_group"]} for p in pm_rows]
     return {"summary":s,"contracts":cs,"employees":es,"expenses":xs,
             "salespeople":[{"id":p["id"],"name":p["display_name"]} for p in sp],
-            "stages":STAGES,"exchangeRate":rate}
+            "stages":STAGES,"exchangeRate":rate,"paymentMethods":pms}
 
 @app.get("/api/sales-analytics")
 def sales_analytics(weighted:bool=True):
@@ -616,6 +641,7 @@ class ContractUpdate(BaseModel):
     monthly:Optional[bool]=None; salespersonId:Optional[str]=None
     contactName:Optional[str]=None; contactPhone:Optional[str]=None
     contactEmail:Optional[str]=None; contactLinkedin:Optional[str]=None
+    paymentMethod:Optional[str]=None
 
 @app.put("/api/contracts/{cid}")
 def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
@@ -633,6 +659,7 @@ def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
     if b.contactPhone is not None: fields.append("contact_phone=?"); vals.append(b.contactPhone)
     if b.contactEmail is not None: fields.append("contact_email=?"); vals.append(b.contactEmail)
     if b.contactLinkedin is not None: fields.append("contact_linkedin=?"); vals.append(b.contactLinkedin)
+    if b.paymentMethod is not None: fields.append("payment_method=?"); vals.append(b.paymentMethod)
     if not fields: return {"ok":True}
     fields.append("updated_at=?"); vals.append(now)
     vals.append(cid)
@@ -692,7 +719,7 @@ def del_employee(eid:str, user=Depends(require_admin)):
     return {"ok":True}
 
 class ExpenseIn(BaseModel):
-    vendor:str; department:str="G&A"; subCategory:str=""; monthlyAmount:float=0; isCogs:bool=False
+    vendor:str; department:str="G&A"; subCategory:str=""; monthlyAmount:float=0; isCogs:int=0
     vendorContact:str=""; vendorEmail:str=""; vendorPhone:str=""; serviceDesc:str=""
     frequency:str="monthly"
 
@@ -710,10 +737,11 @@ def add_expense(b:ExpenseIn, user=Depends(require_admin)):
 
 class ExpenseUpdate(BaseModel):
     vendor:Optional[str]=None; department:Optional[str]=None; subCategory:Optional[str]=None
-    monthlyAmount:Optional[float]=None; isCogs:Optional[bool]=None
+    monthlyAmount:Optional[float]=None; isCogs:Optional[int]=None
     vendorContact:Optional[str]=None; vendorEmail:Optional[str]=None
     vendorPhone:Optional[str]=None; serviceDesc:Optional[str]=None
     frequency:Optional[str]=None; currency:Optional[str]=None
+    paymentMethod:Optional[str]=None
 
 @app.put("/api/expenses/{xid}")
 def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
@@ -728,6 +756,7 @@ def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
     if b.serviceDesc is not None: fields.append("service_desc=?"); vals.append(b.serviceDesc)
     if b.frequency is not None: fields.append("frequency=?"); vals.append(b.frequency)
     if b.currency is not None: fields.append("currency=?"); vals.append(b.currency)
+    if b.paymentMethod is not None: fields.append("payment_method=?"); vals.append(b.paymentMethod)
     if b.monthlyAmount is not None or b.frequency is not None:
         freq = b.frequency
         amt = b.monthlyAmount
@@ -894,6 +923,34 @@ def del_invoice(iid: str, user=Depends(require_admin)):
     return {"ok": True}
 
 # ══════════════════════════════════════════
+# PAYMENT METHODS
+# ══════════════════════════════════════════
+@app.get("/api/payment-methods")
+def list_payment_methods(user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM payment_methods ORDER BY sort_order").fetchall()
+    return [{"id":r["id"],"name":r["name"],"bankGroup":r["bank_group"],"isActive":bool(r["is_active"])} for r in rows]
+
+class PMCreate(BaseModel):
+    name: str
+    bankGroup: str = ""
+
+@app.post("/api/payment-methods")
+def create_payment_method(body: PMCreate, user=Depends(require_admin)):
+    pid = f"pm_{uuid.uuid4().hex[:8]}"
+    with get_db() as db:
+        mx = db.execute("SELECT MAX(sort_order) as mx FROM payment_methods").fetchone()["mx"] or 0
+        db.execute("INSERT INTO payment_methods (id, name, bank_group, is_active, sort_order) VALUES (?,?,?,1,?)",
+                   (pid, body.name, body.bankGroup, mx+1))
+    return {"ok": True, "id": pid}
+
+@app.delete("/api/payment-methods/{pid}")
+def delete_payment_method(pid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("UPDATE payment_methods SET is_active=0 WHERE id=?", (pid,))
+    return {"ok": True}
+
+# ══════════════════════════════════════════
 # CASHFLOW REPORT
 # ══════════════════════════════════════════
 @app.get("/api/cashflow-report")
@@ -902,53 +959,65 @@ def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
     summary = compute(0, 0, 15000, True)
     rate = get_exchange_rate()
     
-    # Load manual bank balances
+    # Load manual bank balances (now keyed by month+bank)
     with get_db() as db:
-        bal_rows = db.execute("SELECT * FROM bank_balances ORDER BY month").fetchall()
-    manual_balances = {r["month"]: dict(r) for r in bal_rows}
+        bal_rows = db.execute("SELECT * FROM bank_balances ORDER BY month, bank").fetchall()
+        pm_rows = db.execute("SELECT * FROM payment_methods WHERE is_active=1 ORDER BY sort_order").fetchall()
+    
+    # Group balances by month -> bank -> data
+    manual_balances = {}
+    for r in bal_rows:
+        manual_balances.setdefault(r["month"], {})[r["bank"]] = dict(r)
+    
+    # Get unique bank groups from payment methods
+    bank_groups = list(set(p["bank_group"] for p in pm_rows if p["bank_group"]))
+    bank_groups.sort()
     
     now = datetime.now()
     current_month_str = f"{now.month:02d}-{now.year}"
     
     months = []
     prev_closing = 0
+    prev_bank_closing = {bg: 0 for bg in bank_groups}
     
     for i, s in enumerate(summary):
         ml = ML[i]
         is_past = ml < current_month_str
         is_current = ml == current_month_str
         
-        # Revenue (cash in from contracts)
         revenue = s["cashIn"]
-        # Expenses: labor + vendor
         labor_total = sum(s["lab"].values())
         vendor_total = sum(s["vd"].values())
         total_expenses = labor_total + vendor_total
-        
-        # Net cashflow
         net = revenue - total_expenses
         
-        # Auto-calculated balances
         auto_opening = prev_closing
         auto_closing = auto_opening + net
         
-        # Check for manual overrides
-        manual = manual_balances.get(ml, {})
-        has_manual = manual.get("is_manual", 0)
+        manual_month = manual_balances.get(ml, {})
+        manual_total = manual_month.get("total", {})
+        has_manual = manual_total.get("is_manual", 0)
         
-        opening = manual.get("opening_balance") if (has_manual and manual.get("opening_balance") is not None) else auto_opening
-        closing = manual.get("closing_balance") if (has_manual and manual.get("closing_balance") is not None) else (opening + net)
+        opening = manual_total.get("opening_balance") if (has_manual and manual_total.get("opening_balance") is not None) else auto_opening
+        closing = manual_total.get("closing_balance") if (has_manual and manual_total.get("closing_balance") is not None) else (opening + net)
         
-        # Currency conversion
-        conv = (1.0 / rate) if currency == "ILS" else 1.0  # if ILS: multiply USD by rate
-        if currency == "ILS":
-            conv = rate  # $1 = ₪rate, so multiply by rate
+        # Per-bank balances
+        banks_data = {}
+        for bg in bank_groups:
+            bank_manual = manual_month.get(bg, {})
+            bk_has_manual = bank_manual.get("is_manual", 0)
+            bk_auto_open = prev_bank_closing.get(bg, 0)
+            bk_open = bank_manual.get("opening_balance") if (bk_has_manual and bank_manual.get("opening_balance") is not None) else bk_auto_open
+            bk_close = bank_manual.get("closing_balance") if (bk_has_manual and bank_manual.get("closing_balance") is not None) else bk_open
+            banks_data[bg] = {"opening": round(bk_open, 2), "closing": round(bk_close, 2), "isManual": bool(bk_has_manual)}
+            prev_bank_closing[bg] = bk_close if bk_has_manual else bk_auto_open
+        
+        conv = rate if currency == "ILS" else 1.0
         
         month_data = {
             "month": ml,
             "monthLabel": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][i],
-            "isPast": is_past,
-            "isCurrent": is_current,
+            "isPast": is_past, "isCurrent": is_current,
             "isForecast": not is_past and not is_current,
             "openingBalance": round(opening * conv, 2),
             "revenue": round(revenue * conv, 2),
@@ -958,23 +1027,26 @@ def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
             "netCashflow": round(net * conv, 2),
             "closingBalance": round(closing * conv, 2),
             "isManual": bool(has_manual),
-            "notes": manual.get("notes", ""),
-            # Raw USD values for reference
+            "notes": manual_total.get("notes", ""),
             "openingBalanceUsd": round(opening, 2),
             "closingBalanceUsd": round(closing, 2),
+            "banks": {bg: {"opening": round(banks_data[bg]["opening"] * conv, 2), "closing": round(banks_data[bg]["closing"] * conv, 2), "isManual": banks_data[bg]["isManual"]} for bg in bank_groups},
         }
         months.append(month_data)
-        prev_closing = closing  # USD for next month calc
+        prev_closing = closing
     
     return {
         "months": months,
         "currency": currency,
         "exchangeRate": rate,
-        "currentMonth": current_month_str
+        "currentMonth": current_month_str,
+        "bankGroups": bank_groups,
+        "paymentMethods": [{"id":p["id"],"name":p["name"],"bankGroup":p["bank_group"]} for p in pm_rows]
     }
 
 class BalanceUpdate(BaseModel):
     month: str
+    bank: str = "total"
     openingBalance: Optional[float] = None
     closingBalance: Optional[float] = None
     notes: str = ""
@@ -982,7 +1054,7 @@ class BalanceUpdate(BaseModel):
 @app.put("/api/cashflow-report/balance")
 def update_balance(b: BalanceUpdate, user=Depends(require_admin)):
     with get_db() as db:
-        existing = db.execute("SELECT * FROM bank_balances WHERE month=?", (b.month,)).fetchone()
+        existing = db.execute("SELECT * FROM bank_balances WHERE month=? AND bank=?", (b.month, b.bank)).fetchone()
         if existing:
             fields = ["is_manual=1"]
             vals = []
@@ -992,11 +1064,11 @@ def update_balance(b: BalanceUpdate, user=Depends(require_admin)):
                 fields.append("closing_balance=?"); vals.append(b.closingBalance)
             if b.notes:
                 fields.append("notes=?"); vals.append(b.notes)
-            vals.append(b.month)
-            db.execute(f"UPDATE bank_balances SET {','.join(fields)} WHERE month=?", vals)
+            vals.extend([b.month, b.bank])
+            db.execute(f"UPDATE bank_balances SET {','.join(fields)} WHERE month=? AND bank=?", vals)
         else:
-            db.execute("INSERT INTO bank_balances (month, opening_balance, closing_balance, is_manual, notes) VALUES (?,?,?,1,?)",
-                       (b.month, b.openingBalance, b.closingBalance, b.notes))
+            db.execute("INSERT INTO bank_balances (month, bank, opening_balance, closing_balance, is_manual, notes) VALUES (?,?,?,?,1,?)",
+                       (b.month, b.bank, b.openingBalance, b.closingBalance, b.notes))
     return {"ok": True}
 
 @app.post("/api/cashflow-report/upload")
