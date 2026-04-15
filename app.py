@@ -83,6 +83,7 @@ def init_db():
             contact_email TEXT DEFAULT '', contact_linkedin TEXT DEFAULT '',
             payment_splits TEXT DEFAULT '[]',
             payment_method TEXT DEFAULT '',
+            is_new_client INTEGER DEFAULT 1,
             created_at TEXT, updated_at TEXT,
             FOREIGN KEY (salesperson_id) REFERENCES users(id)
         );
@@ -92,6 +93,9 @@ def init_db():
             currency TEXT DEFAULT 'ILS',
             vendor_contact TEXT DEFAULT '', vendor_email TEXT DEFAULT '',
             vendor_phone TEXT DEFAULT '', service_desc TEXT DEFAULT '',
+            vendor_bank_num TEXT DEFAULT '', vendor_branch_num TEXT DEFAULT '',
+            vendor_account_num TEXT DEFAULT '',
+            is_fixed INTEGER DEFAULT 1,
             frequency TEXT DEFAULT 'monthly',
             payment_method TEXT DEFAULT ''
         );
@@ -124,6 +128,42 @@ def init_db():
             bank_group TEXT DEFAULT '',
             is_active INTEGER DEFAULT 1,
             sort_order INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS alert_dismissals (
+            id TEXT PRIMARY KEY,
+            alert_key TEXT NOT NULL,
+            dismissed_by TEXT NOT NULL,
+            dismissed_at TEXT,
+            action_note TEXT DEFAULT '',
+            UNIQUE(alert_key, dismissed_by)
+        );
+        CREATE TABLE IF NOT EXISTS sales_targets (
+            id TEXT PRIMARY KEY,
+            salesperson_id TEXT NOT NULL,
+            year INTEGER DEFAULT 2026,
+            month INTEGER,
+            revenue_target REAL DEFAULT 0,
+            deals_target INTEGER DEFAULT 0,
+            avg_deal_target REAL DEFAULT 0,
+            cycle_days_target INTEGER DEFAULT 0,
+            close_rate_target REAL DEFAULT 0,
+            new_clients_target INTEGER DEFAULT 0,
+            created_at TEXT,
+            FOREIGN KEY (salesperson_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS scenarios (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS scenario_items (
+            id TEXT PRIMARY KEY,
+            scenario_id TEXT NOT NULL,
+            item_type TEXT NOT NULL,
+            config TEXT DEFAULT '{}',
+            FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT, entity_id TEXT,
@@ -225,6 +265,34 @@ def to_usd(amount, currency, month_str=None):
     if currency == 'EUR':
         return amount * get_eur_rate()
     return amount
+
+def auto_migrate():
+    """Add missing columns to existing tables without dropping data."""
+    migrations = [
+        ("expenses", "vendor_bank_num", "TEXT DEFAULT ''"),
+        ("expenses", "vendor_branch_num", "TEXT DEFAULT ''"),
+        ("expenses", "vendor_account_num", "TEXT DEFAULT ''"),
+        ("expenses", "is_fixed", "INTEGER DEFAULT 1"),
+        ("expenses", "currency", "TEXT DEFAULT 'ILS'"),
+        ("contracts", "is_new_client", "INTEGER DEFAULT 1"),
+        ("contracts", "payment_splits", "TEXT DEFAULT '[]'"),
+        ("contracts", "payment_method", "TEXT DEFAULT ''"),
+        ("contracts", "contact_name", "TEXT DEFAULT ''"),
+        ("contracts", "contact_phone", "TEXT DEFAULT ''"),
+        ("contracts", "contact_email", "TEXT DEFAULT ''"),
+        ("contracts", "contact_linkedin", "TEXT DEFAULT ''"),
+        ("sales_targets", "avg_deal_target", "REAL DEFAULT 0"),
+        ("sales_targets", "cycle_days_target", "INTEGER DEFAULT 0"),
+        ("sales_targets", "close_rate_target", "REAL DEFAULT 0"),
+        ("sales_targets", "new_clients_target", "INTEGER DEFAULT 0"),
+    ]
+    with get_db() as db:
+        for table, column, col_type in migrations:
+            try:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                print(f"  Migration: added {table}.{column}")
+            except Exception:
+                pass  # Column already exists
 
 def is_seeded():
     with get_db() as db: return db.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] > 0
@@ -492,6 +560,7 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "contactEmail":c.get("contact_email",""),"contactLinkedin":c.get("contact_linkedin",""),
          "paymentSplits":json.loads(c.get("payment_splits","[]")) if c.get("payment_splits") else [],
          "paymentMethod":c.get("payment_method",""),
+         "isNewClient":bool(c.get("is_new_client",1)),
          "createdAt":c["created_at"],"updatedAt":c["updated_at"]} for c in contracts]
     es=[{"id":e["id"],"name":e["name"],"dept":e["dept"],"gross":e["gross"],
          "positionPct":e.get("position_pct",100),"bonus":e.get("bonus",0),
@@ -504,6 +573,9 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "amountOriginal":round(sum(x["amounts"].values())/max(len(x["amounts"]),1),2),
          "vendorContact":x.get("vendor_contact",""),"vendorEmail":x.get("vendor_email",""),
          "vendorPhone":x.get("vendor_phone",""),"serviceDesc":x.get("service_desc",""),
+         "vendorBankNum":x.get("vendor_bank_num",""),"vendorBranchNum":x.get("vendor_branch_num",""),
+         "vendorAccountNum":x.get("vendor_account_num",""),
+         "isFixed":bool(x.get("is_fixed",1)),
          "frequency":x.get("frequency","monthly"),
          "paymentMethod":x.get("payment_method","")} for x in expenses]
     sp=load_salespeople()
@@ -641,7 +713,7 @@ class ContractUpdate(BaseModel):
     monthly:Optional[bool]=None; salespersonId:Optional[str]=None
     contactName:Optional[str]=None; contactPhone:Optional[str]=None
     contactEmail:Optional[str]=None; contactLinkedin:Optional[str]=None
-    paymentMethod:Optional[str]=None
+    paymentMethod:Optional[str]=None; isNewClient:Optional[bool]=None
 
 @app.put("/api/contracts/{cid}")
 def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
@@ -654,12 +726,16 @@ def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
     if b.dso is not None: fields.append("dso=?"); vals.append(b.dso)
     if b.chance is not None: fields.append("chance=?"); vals.append(b.chance)
     if b.monthly is not None: fields.append("monthly=?"); vals.append(int(b.monthly))
-    if b.salespersonId is not None: fields.append("salesperson_id=?"); vals.append(b.salespersonId)
+    if b.salespersonId is not None:
+        # Only admin and sales_manager can reassign salesperson
+        if user["role"] in ("admin", "sales_manager"):
+            fields.append("salesperson_id=?"); vals.append(b.salespersonId)
     if b.contactName is not None: fields.append("contact_name=?"); vals.append(b.contactName)
     if b.contactPhone is not None: fields.append("contact_phone=?"); vals.append(b.contactPhone)
     if b.contactEmail is not None: fields.append("contact_email=?"); vals.append(b.contactEmail)
     if b.contactLinkedin is not None: fields.append("contact_linkedin=?"); vals.append(b.contactLinkedin)
     if b.paymentMethod is not None: fields.append("payment_method=?"); vals.append(b.paymentMethod)
+    if b.isNewClient is not None: fields.append("is_new_client=?"); vals.append(int(b.isNewClient))
     if not fields: return {"ok":True}
     fields.append("updated_at=?"); vals.append(now)
     vals.append(cid)
@@ -721,7 +797,7 @@ def del_employee(eid:str, user=Depends(require_admin)):
 class ExpenseIn(BaseModel):
     vendor:str; department:str="G&A"; subCategory:str=""; monthlyAmount:float=0; isCogs:int=0
     vendorContact:str=""; vendorEmail:str=""; vendorPhone:str=""; serviceDesc:str=""
-    frequency:str="monthly"
+    frequency:str="monthly"; currency:str="ILS"
 
 FREQ_MULTIPLIERS = {"monthly":1,"bimonthly":0.5,"quarterly":1/3,"semi_annual":1/6,"annual":1/12}
 
@@ -731,8 +807,8 @@ def add_expense(b:ExpenseIn, user=Depends(require_admin)):
     mult=FREQ_MULTIPLIERS.get(b.frequency, 1)
     amounts={m: round(b.monthlyAmount * mult, 2) for m in ML}
     with get_db() as db:
-        db.execute("INSERT INTO expenses (id,dept,vendor,sub_cat,is_cogs,amounts,vendor_contact,vendor_email,vendor_phone,service_desc,frequency) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                   (xid,b.department,b.vendor,b.subCategory,int(b.isCogs),json.dumps(amounts),b.vendorContact,b.vendorEmail,b.vendorPhone,b.serviceDesc,b.frequency))
+        db.execute("INSERT INTO expenses (id,dept,vendor,sub_cat,is_cogs,amounts,currency,vendor_contact,vendor_email,vendor_phone,service_desc,frequency) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (xid,b.department,b.vendor,b.subCategory,int(b.isCogs),json.dumps(amounts),b.currency,b.vendorContact,b.vendorEmail,b.vendorPhone,b.serviceDesc,b.frequency))
     return {"ok":True,"id":xid}
 
 class ExpenseUpdate(BaseModel):
@@ -742,6 +818,8 @@ class ExpenseUpdate(BaseModel):
     vendorPhone:Optional[str]=None; serviceDesc:Optional[str]=None
     frequency:Optional[str]=None; currency:Optional[str]=None
     paymentMethod:Optional[str]=None
+    vendorBankNum:Optional[str]=None; vendorBranchNum:Optional[str]=None
+    vendorAccountNum:Optional[str]=None; isFixed:Optional[bool]=None
 
 @app.put("/api/expenses/{xid}")
 def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
@@ -757,6 +835,10 @@ def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
     if b.frequency is not None: fields.append("frequency=?"); vals.append(b.frequency)
     if b.currency is not None: fields.append("currency=?"); vals.append(b.currency)
     if b.paymentMethod is not None: fields.append("payment_method=?"); vals.append(b.paymentMethod)
+    if b.vendorBankNum is not None: fields.append("vendor_bank_num=?"); vals.append(b.vendorBankNum)
+    if b.vendorBranchNum is not None: fields.append("vendor_branch_num=?"); vals.append(b.vendorBranchNum)
+    if b.vendorAccountNum is not None: fields.append("vendor_account_num=?"); vals.append(b.vendorAccountNum)
+    if b.isFixed is not None: fields.append("is_fixed=?"); vals.append(int(b.isFixed))
     if b.monthlyAmount is not None or b.frequency is not None:
         freq = b.frequency
         amt = b.monthlyAmount
@@ -923,6 +1005,531 @@ def del_invoice(iid: str, user=Depends(require_admin)):
     return {"ok": True}
 
 # ══════════════════════════════════════════
+# SALES TARGETS & KPIs
+# ══════════════════════════════════════════
+@app.get("/api/sales-targets")
+def get_sales_targets(year: int = 2026, user=Depends(get_current_user)):
+    if user["role"] not in ("admin", "sales_manager"):
+        raise HTTPException(403)
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM sales_targets WHERE year=? ORDER BY salesperson_id, month", (year,)).fetchall()
+    return [{"id":r["id"],"salespersonId":r["salesperson_id"],"year":r["year"],"month":r["month"],
+             "revenueTarget":r["revenue_target"],"dealsTarget":r["deals_target"]} for r in rows]
+
+class TargetSet(BaseModel):
+    salespersonId: str
+    year: int = 2026
+    month: int  # 1-12
+    revenueTarget: float = 0
+    dealsTarget: int = 0
+    avgDealTarget: float = 0
+    cycleDaysTarget: int = 0
+    closeRateTarget: float = 0
+    newClientsTarget: int = 0
+
+@app.post("/api/sales-targets")
+def set_sales_target(b: TargetSet, user=Depends(get_current_user)):
+    if user["role"] not in ("admin", "sales_manager"):
+        raise HTTPException(403)
+    tid = f"st_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("DELETE FROM sales_targets WHERE salesperson_id=? AND year=? AND month=?",
+                   (b.salespersonId, b.year, b.month))
+        db.execute("INSERT INTO sales_targets (id,salesperson_id,year,month,revenue_target,deals_target,avg_deal_target,cycle_days_target,close_rate_target,new_clients_target,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                   (tid, b.salespersonId, b.year, b.month, b.revenueTarget, b.dealsTarget, b.avgDealTarget, b.cycleDaysTarget, b.closeRateTarget, b.newClientsTarget, now))
+    return {"ok": True}
+
+@app.post("/api/sales-targets/bulk")
+def set_bulk_targets(targets: list[TargetSet], user=Depends(get_current_user)):
+    if user["role"] not in ("admin", "sales_manager"):
+        raise HTTPException(403)
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        for b in targets:
+            db.execute("DELETE FROM sales_targets WHERE salesperson_id=? AND year=? AND month=?",
+                       (b.salespersonId, b.year, b.month))
+            tid = f"st_{uuid4().hex[:8]}"
+            db.execute("INSERT INTO sales_targets (id,salesperson_id,year,month,revenue_target,deals_target,avg_deal_target,cycle_days_target,close_rate_target,new_clients_target,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                       (tid, b.salespersonId, b.year, b.month, b.revenueTarget, b.dealsTarget, b.avgDealTarget, b.cycleDaysTarget, b.closeRateTarget, b.newClientsTarget, now))
+    return {"ok": True}
+
+@app.get("/api/sales-kpis")
+def sales_kpis(year: int = 2026, user=Depends(get_current_user)):
+    try:
+        contracts = load_contracts()
+        salespeople = load_salespeople()
+    except Exception as e:
+        return {"error": str(e)}
+    with get_db() as db:
+        targets = db.execute("SELECT * FROM sales_targets WHERE year=? ORDER BY salesperson_id, month", (year,)).fetchall()
+    
+    # Build targets lookup
+    tgt_map = {}
+    for t in targets:
+        tgt_map.setdefault(t["salesperson_id"], {})[t["month"]] = {
+            "rev": t["revenue_target"], "deals": t["deals_target"],
+            "avgDeal": t["avg_deal_target"], "cycleDays": t["cycle_days_target"],
+            "closeRate": t["close_rate_target"], "newClients": t["new_clients_target"]
+        }
+    
+    # Stage order for conversion tracking
+    stage_order = ["Initial Contact", "Email Sent", "Demo", "Negotiation", "Signed"]
+    
+    result = []
+    for sp in salespeople:
+        sid = sp["id"]
+        sp_contracts = [c for c in contracts if c["salesperson_id"] == sid]
+        sp_targets = tgt_map.get(sid, {})
+        
+        months_data = []
+        for m in range(1, 13):
+            m_contracts = [c for c in sp_contracts if c.get("sm") == m]
+            signed = [c for c in m_contracts if c["stage"] == "Signed"]
+            signed_rev = sum(to_usd(c["val"], c.get("currency", "USD")) for c in signed)
+            signed_count = len(signed)
+            total_count = len(m_contracts)
+            
+            # New clients
+            new_clients = [c for c in signed if c.get("is_new_client", 1)]
+            new_client_count = len(new_clients)
+            new_client_rev = sum(to_usd(c["val"], c.get("currency", "USD")) for c in new_clients)
+            
+            # Avg deal size
+            avg_deal = (signed_rev / signed_count) if signed_count > 0 else 0
+            
+            # Cycle time (days from created_at to stage_updated_at for signed deals)
+            cycle_days_list = []
+            for c in signed:
+                if c.get("created_at") and c.get("stage_updated_at"):
+                    try:
+                        created = datetime.fromisoformat(c["created_at"].replace("Z",""))
+                        closed = datetime.fromisoformat(c["stage_updated_at"].replace("Z",""))
+                        cycle_days_list.append((closed - created).days)
+                    except: pass
+            avg_cycle = (sum(cycle_days_list) / len(cycle_days_list)) if cycle_days_list else 0
+            
+            # Close rate
+            close_rate = (signed_count / total_count * 100) if total_count > 0 else 0
+            
+            # Stage-to-stage conversion
+            stage_counts = {}
+            for st in stage_order:
+                st_idx = stage_order.index(st)
+                stage_counts[st] = len([c for c in m_contracts if c["stage"] in stage_order and stage_order.index(c["stage"]) >= st_idx])
+            
+            conversions = {}
+            for i in range(len(stage_order)-1):
+                fr = stage_order[i]; to = stage_order[i+1]
+                fr_count = stage_counts.get(fr, 0)
+                to_count = stage_counts.get(to, 0)
+                conversions[fr+"→"+to] = round(to_count / fr_count * 100, 1) if fr_count > 0 else 0
+            
+            # Targets
+            tgt = sp_targets.get(m, {"rev":0,"deals":0,"avgDeal":0,"cycleDays":0,"closeRate":0,"newClients":0})
+            
+            months_data.append({
+                "month": m,
+                "signedRevenue": round(signed_rev, 2),
+                "signedDeals": signed_count,
+                "totalDeals": total_count,
+                "avgDealSize": round(avg_deal, 2),
+                "avgCycleDays": round(avg_cycle, 1),
+                "closeRate": round(close_rate, 1),
+                "newClients": new_client_count,
+                "newClientRevenue": round(new_client_rev, 2),
+                "newClientPct": round(new_client_rev / signed_rev * 100, 1) if signed_rev > 0 else 0,
+                "conversions": conversions,
+                "revenueTarget": tgt["rev"],
+                "dealsTarget": tgt["deals"],
+                "avgDealTarget": tgt["avgDeal"],
+                "cycleDaysTarget": tgt["cycleDays"],
+                "closeRateTarget": tgt["closeRate"],
+                "newClientsTarget": tgt["newClients"],
+                "revenuePct": round(signed_rev / tgt["rev"] * 100, 1) if tgt["rev"] > 0 else 0,
+                "dealsPct": round(signed_count / tgt["deals"] * 100, 1) if tgt["deals"] > 0 else 0,
+            })
+        
+        # Totals
+        t_rev = sum(md["signedRevenue"] for md in months_data)
+        t_deals = sum(md["signedDeals"] for md in months_data)
+        t_total = sum(md["totalDeals"] for md in months_data)
+        t_new = sum(md["newClients"] for md in months_data)
+        t_new_rev = sum(md["newClientRevenue"] for md in months_data)
+        t_rev_tgt = sum(md["revenueTarget"] for md in months_data)
+        t_deals_tgt = sum(md["dealsTarget"] for md in months_data)
+        t_new_tgt = sum(md["newClientsTarget"] for md in months_data)
+        cycles = [md["avgCycleDays"] for md in months_data if md["avgCycleDays"] > 0]
+        
+        result.append({
+            "salespersonId": sid,
+            "salespersonName": sp["display_name"],
+            "months": months_data,
+            "totals": {
+                "signedRevenue": round(t_rev, 2),
+                "signedDeals": t_deals,
+                "totalDeals": t_total,
+                "avgDealSize": round(t_rev / t_deals, 2) if t_deals > 0 else 0,
+                "avgCycleDays": round(sum(cycles) / len(cycles), 1) if cycles else 0,
+                "closeRate": round(t_deals / t_total * 100, 1) if t_total > 0 else 0,
+                "newClients": t_new,
+                "newClientRevenue": round(t_new_rev, 2),
+                "newClientPct": round(t_new_rev / t_rev * 100, 1) if t_rev > 0 else 0,
+                "revenueTarget": t_rev_tgt,
+                "dealsTarget": t_deals_tgt,
+                "newClientsTarget": t_new_tgt,
+                "revenuePct": round(t_rev / t_rev_tgt * 100, 1) if t_rev_tgt > 0 else 0,
+                "dealsPct": round(t_deals / t_deals_tgt * 100, 1) if t_deals_tgt > 0 else 0,
+            }
+        })
+    
+    return result
+
+# ══════════════════════════════════════════
+# ══════════════════════════════════════════
+# ALERTS SYSTEM
+# ══════════════════════════════════════════
+@app.get("/api/alerts")
+def get_alerts(user=Depends(get_current_user)):
+    uid = user["sub"]
+    role = user["role"]
+    now = datetime.now()
+    alerts = []
+    
+    with get_db() as db:
+        # Get dismissed alerts for this user
+        dismissed = set()
+        for r in db.execute("SELECT alert_key FROM alert_dismissals WHERE dismissed_by=?", (uid,)).fetchall():
+            dismissed.add(r["alert_key"])
+        
+        # --- ALERT TYPE 1: Deal cycle time exceeded ---
+        # Deals not yet Signed that have been open too long
+        cycle_thresholds = {"Government": 90, "Enterprise": 60, "Academy": 45}
+        contracts = db.execute("""SELECT c.id, c.client, c.country, c.industry, c.stage, c.created_at, 
+                                        c.salesperson_id, u.display_name as sp_name
+                                 FROM contracts c LEFT JOIN users u ON c.salesperson_id=u.id
+                                 WHERE c.stage != 'Signed'""").fetchall()
+        for c in contracts:
+            if not c["created_at"]: continue
+            try:
+                created = datetime.fromisoformat(c["created_at"].replace("Z",""))
+                days = (now - created).days
+                threshold = cycle_thresholds.get(c["industry"], 60)
+                if days > threshold:
+                    key = f"cycle_{c['id']}_{days//7}"  # refreshes weekly so dismiss lasts ~1 week
+                    if key not in dismissed:
+                        # Filter by role: sales see only their own
+                        if role == "sales" and c["salesperson_id"] != uid:
+                            continue
+                        alerts.append({
+                            "key": key,
+                            "type": "cycle_overdue",
+                            "severity": "warning" if days < threshold * 1.5 else "critical",
+                            "title": f"Deal overdue: {c['client']}",
+                            "message": f"{days} days open (limit: {threshold}d for {c['industry']}). Stage: {c['stage']}",
+                            "entityType": "contract",
+                            "entityId": c["id"],
+                            "assignee": c["sp_name"] or "Unassigned",
+                            "assigneeId": c["salesperson_id"],
+                            "daysOverdue": days - threshold,
+                            "action": "Contact client and update status"
+                        })
+            except: pass
+        
+        # --- ALERT TYPE 2: Overdue invoices ---
+        if role in ("admin", "sales_manager"):
+            invoices = db.execute("""SELECT i.id, i.expense_id, i.invoice_number, i.amount, i.currency,
+                                           i.due_date, i.paid_amount, i.status, e.vendor
+                                    FROM invoices i LEFT JOIN expenses e ON i.expense_id=e.id
+                                    WHERE i.status != 'paid' AND i.due_date IS NOT NULL""").fetchall()
+            for inv in invoices:
+                try:
+                    due = datetime.fromisoformat(inv["due_date"])
+                    if now > due:
+                        days_late = (now - due).days
+                        remaining = inv["amount"] - (inv["paid_amount"] or 0)
+                        key = f"invoice_{inv['id']}_{days_late//7}"
+                        if key not in dismissed:
+                            cur_sym = "₪" if inv["currency"] == "ILS" else "$"
+                            alerts.append({
+                                "key": key,
+                                "type": "invoice_overdue",
+                                "severity": "warning" if days_late < 30 else "critical",
+                                "title": f"Overdue payment: {inv['vendor']}",
+                                "message": f"Invoice {inv['invoice_number'] or '#'} — {cur_sym}{remaining:,.0f} remaining. {days_late} days past due.",
+                                "entityType": "invoice",
+                                "entityId": inv["id"],
+                                "assignee": "Finance",
+                                "daysOverdue": days_late,
+                                "action": "Update payment date or record payment"
+                            })
+                except: pass
+        
+        # --- ALERT TYPE 3: Stale deals (no update in 14+ days) ---
+        stale_days = 14
+        stale_contracts = db.execute("""SELECT c.id, c.client, c.stage, c.updated_at, c.salesperson_id,
+                                              u.display_name as sp_name
+                                       FROM contracts c LEFT JOIN users u ON c.salesperson_id=u.id
+                                       WHERE c.stage != 'Signed'""").fetchall()
+        for c in stale_contracts:
+            if not c["updated_at"]: continue
+            try:
+                updated = datetime.fromisoformat(c["updated_at"].replace("Z",""))
+                days_stale = (now - updated).days
+                if days_stale >= stale_days:
+                    key = f"stale_{c['id']}_{days_stale//7}"
+                    if key not in dismissed:
+                        if role == "sales" and c["salesperson_id"] != uid:
+                            continue
+                        alerts.append({
+                            "key": key,
+                            "type": "stale_deal",
+                            "severity": "info" if days_stale < 30 else "warning",
+                            "title": f"Stale deal: {c['client']}",
+                            "message": f"No updates for {days_stale} days. Stage: {c['stage']}",
+                            "entityType": "contract",
+                            "entityId": c["id"],
+                            "assignee": c["sp_name"] or "Unassigned",
+                            "assigneeId": c.get("salesperson_id"),
+                            "daysOverdue": days_stale - stale_days,
+                            "action": "Follow up with client"
+                        })
+            except: pass
+    
+    # Sort by severity (critical first), then by daysOverdue
+    sev_order = {"critical": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda a: (sev_order.get(a["severity"], 9), -a.get("daysOverdue", 0)))
+    
+    return {"alerts": alerts, "count": len(alerts)}
+
+class DismissAlert(BaseModel):
+    alertKey: str
+    actionNote: str = ""
+
+@app.post("/api/alerts/dismiss")
+def dismiss_alert(b: DismissAlert, user=Depends(get_current_user)):
+    uid = user["sub"]
+    now = datetime.now().isoformat()
+    aid = f"ad_{uuid4().hex[:8]}"
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO alert_dismissals (id, alert_key, dismissed_by, dismissed_at, action_note) VALUES (?,?,?,?,?)",
+                   (aid, b.alertKey, uid, now, b.actionNote))
+    return {"ok": True}
+
+# SCENARIOS (What-If)
+# ══════════════════════════════════════════
+@app.get("/api/scenarios")
+def list_scenarios(user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM scenarios ORDER BY updated_at DESC").fetchall()
+    return [{"id":r["id"],"name":r["name"],"description":r["description"],"updatedAt":r["updated_at"]} for r in rows]
+
+class ScenarioCreate(BaseModel):
+    name: str
+    description: str = ""
+
+@app.post("/api/scenarios")
+def create_scenario(b: ScenarioCreate, user=Depends(require_admin)):
+    sid = f"sc_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO scenarios (id,name,description,created_at,updated_at) VALUES (?,?,?,?,?)",
+                   (sid, b.name, b.description, now, now))
+    return {"ok": True, "id": sid}
+
+@app.delete("/api/scenarios/{sid}")
+def delete_scenario(sid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM scenario_items WHERE scenario_id=?", (sid,))
+        db.execute("DELETE FROM scenarios WHERE id=?", (sid,))
+    return {"ok": True}
+
+@app.get("/api/scenarios/{sid}")
+def get_scenario(sid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        sc = db.execute("SELECT * FROM scenarios WHERE id=?", (sid,)).fetchone()
+        if not sc: raise HTTPException(404)
+        items = db.execute("SELECT * FROM scenario_items WHERE scenario_id=? ORDER BY id", (sid,)).fetchall()
+    return {
+        "id": sc["id"], "name": sc["name"], "description": sc["description"],
+        "items": [{"id":it["id"],"type":it["item_type"],"config":json.loads(it["config"])} for it in items]
+    }
+
+class ScenarioItemCreate(BaseModel):
+    itemType: str  # "hire", "expense_change", "revenue_stream", "ttm_reduction"
+    config: dict
+
+@app.post("/api/scenarios/{sid}/items")
+def add_scenario_item(sid: str, b: ScenarioItemCreate, user=Depends(require_admin)):
+    iid = f"si_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO scenario_items (id,scenario_id,item_type,config) VALUES (?,?,?,?)",
+                   (iid, sid, b.itemType, json.dumps(b.config)))
+        db.execute("UPDATE scenarios SET updated_at=? WHERE id=?", (now, sid))
+    return {"ok": True, "id": iid}
+
+@app.delete("/api/scenarios/{sid}/items/{iid}")
+def remove_scenario_item(sid: str, iid: str, user=Depends(require_admin)):
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("DELETE FROM scenario_items WHERE id=? AND scenario_id=?", (iid, sid))
+        db.execute("UPDATE scenarios SET updated_at=? WHERE id=?", (now, sid))
+    return {"ok": True}
+
+@app.put("/api/scenarios/{sid}/items/{iid}")
+def update_scenario_item(sid: str, iid: str, b: ScenarioItemCreate, user=Depends(require_admin)):
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("UPDATE scenario_items SET item_type=?, config=? WHERE id=? AND scenario_id=?",
+                   (b.itemType, json.dumps(b.config), iid, sid))
+        db.execute("UPDATE scenarios SET updated_at=? WHERE id=?", (now, sid))
+    return {"ok": True}
+
+@app.get("/api/scenarios/{sid}/compute")
+def compute_scenario(sid: str, user=Depends(require_admin)):
+    """Compute baseline vs scenario financials."""
+    # Baseline
+    base_summary = compute(0, 0, 15000, True)
+    rate = get_exchange_rate()
+    
+    # Load scenario items
+    with get_db() as db:
+        items = db.execute("SELECT * FROM scenario_items WHERE scenario_id=?", (sid,)).fetchall()
+    
+    # Apply scenario adjustments on top of baseline
+    scenario_months = []
+    for i, bs in enumerate(base_summary):
+        sm = dict(bs)
+        sm["lab"] = dict(bs["lab"])
+        sm["vd"] = dict(bs["vd"])
+        sm["addedRev"] = 0
+        sm["addedExp"] = 0
+        scenario_months.append(sm)
+    
+    for it in items:
+        cfg = json.loads(it["config"])
+        itype = it["item_type"]
+        
+        if itype == "hire":
+            dept = cfg.get("dept", "S&M")
+            cost_orig = cfg.get("monthlyCost", 0)
+            cur = cfg.get("currency", "ILS")
+            cost_usd = to_usd(cost_orig, cur) * ECF
+            start_m = cfg.get("startMonth", 1) - 1
+            
+            # Add labor cost from start month
+            for mi in range(start_m, 12):
+                scenario_months[mi]["lab"][dept] = scenario_months[mi]["lab"].get(dept, 0) + cost_usd
+                scenario_months[mi]["totalExp"] = scenario_months[mi].get("totalExp", 0) + cost_usd
+                scenario_months[mi]["addedExp"] += cost_usd
+            
+            if dept == "R&D":
+                # R&D hire: TTM reduction - pull future revenue forward
+                ttm_months = cfg.get("ttmReduction", 0)
+                if ttm_months > 0:
+                    for mi in range(12):
+                        future_mi = mi + ttm_months
+                        if future_mi < 12:
+                            pulled_rev = base_summary[future_mi]["cashIn"] - base_summary[mi]["cashIn"]
+                            if pulled_rev > 0:
+                                boost = pulled_rev * 0.5
+                                scenario_months[mi]["cashIn"] = scenario_months[mi].get("cashIn", 0) + boost
+                                scenario_months[mi]["addedRev"] += boost
+            else:
+                # S&M / other hire: direct revenue generation
+                rev_per_month = cfg.get("expectedRevenue", 0)
+                rev_start = cfg.get("revenueStartMonth", 7) - 1
+                rev_growth = cfg.get("revenueGrowthPct", 0) / 100.0
+                if rev_per_month > 0:
+                    for mi in range(rev_start, 12):
+                        months_active = mi - rev_start
+                        growth_factor = 1 + (rev_growth * months_active / 12)
+                        rev = rev_per_month * growth_factor
+                        scenario_months[mi]["cashIn"] = scenario_months[mi].get("cashIn", 0) + rev
+                        scenario_months[mi]["addedRev"] += rev
+        
+        elif itype == "expense_change":
+            # Change existing expense: vendor, newAmount, currency, fromMonth
+            new_amt = to_usd(cfg.get("newAmount", 0), cfg.get("currency", "USD"))
+            old_amt = to_usd(cfg.get("oldAmount", 0), cfg.get("currency", "USD"))
+            dept = cfg.get("dept", "G&A")
+            from_m = cfg.get("fromMonth", 1) - 1
+            delta = new_amt - old_amt
+            
+            for mi in range(from_m, 12):
+                scenario_months[mi]["vd"][dept] = scenario_months[mi]["vd"].get(dept, 0) + delta
+                scenario_months[mi]["totalExp"] = scenario_months[mi].get("totalExp", 0) + delta
+                scenario_months[mi]["addedExp"] += delta
+        
+        elif itype == "revenue_stream":
+            # New revenue: amount, fromMonth, growthPct
+            amt = cfg.get("monthlyAmount", 0)
+            from_m = cfg.get("fromMonth", 1) - 1
+            growth = cfg.get("growthPct", 0) / 100.0
+            
+            for mi in range(from_m, 12):
+                months_active = mi - from_m
+                growth_factor = 1 + (growth * months_active / 12)
+                rev = amt * growth_factor
+                scenario_months[mi]["cashIn"] = scenario_months[mi].get("cashIn", 0) + rev
+                scenario_months[mi]["addedRev"] += rev
+    
+    # Recalculate cumulative cash
+    prev_cash = 0
+    for sm in scenario_months:
+        sm["totalExp"] = sum(sm["lab"].values()) + sum(sm["vd"].values())
+        sm["net"] = sm["cashIn"] - sm["totalExp"]
+        sm["cumCash"] = prev_cash + sm["net"]
+        prev_cash = sm["cumCash"]
+    
+    # Build response
+    labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    result = []
+    base_prev = 0
+    for i in range(12):
+        bs = base_summary[i]
+        sc = scenario_months[i]
+        b_total_exp = sum(bs["lab"].values()) + sum(bs["vd"].values())
+        b_net = bs["cashIn"] - b_total_exp
+        base_cum = base_prev + b_net
+        base_prev = base_cum
+        
+        result.append({
+            "month": labels[i],
+            "baseRevenue": round(bs["revenue"], 2),
+            "baseExpenses": round(b_total_exp, 2),
+            "baseNet": round(b_net, 2),
+            "baseCash": round(base_cum, 2),
+            "baseCashIn": round(bs["cashIn"], 2),
+            "scenRevenue": round(sc.get("revenue", 0) + sc.get("addedRev", 0), 2),
+            "scenExpenses": round(sc["totalExp"], 2),
+            "scenNet": round(sc["net"], 2),
+            "scenCash": round(sc["cumCash"], 2),
+            "deltaRevenue": round((sc.get("revenue", 0) + sc.get("addedRev", 0)) - bs["revenue"], 2),
+            "deltaExpenses": round(sc["totalExp"] - b_total_exp, 2),
+            "deltaNet": round(sc["net"] - b_net, 2),
+            "deltaCash": round(sc["cumCash"] - base_cum, 2),
+            "addedRev": round(sc.get("addedRev", 0), 2),
+            "addedExp": round(sc.get("addedExp", 0), 2),
+        })
+    
+    # Totals
+    totals = {
+        "baseRevenue": round(sum(r["baseRevenue"] for r in result), 2),
+        "baseExpenses": round(sum(r["baseExpenses"] for r in result), 2),
+        "scenRevenue": round(sum(r["scenRevenue"] for r in result), 2),
+        "scenExpenses": round(sum(r["scenExpenses"] for r in result), 2),
+    }
+    totals["deltaRevenue"] = round(totals["scenRevenue"] - totals["baseRevenue"], 2)
+    totals["deltaExpenses"] = round(totals["scenExpenses"] - totals["baseExpenses"], 2)
+    totals["baseNet"] = round(totals["baseRevenue"] - totals["baseExpenses"], 2)
+    totals["scenNet"] = round(totals["scenRevenue"] - totals["scenExpenses"], 2)
+    totals["deltaNet"] = round(totals["scenNet"] - totals["baseNet"], 2)
+    
+    return {"months": result, "totals": totals}
+
+# ══════════════════════════════════════════
 # PAYMENT METHODS
 # ══════════════════════════════════════════
 @app.get("/api/payment-methods")
@@ -937,7 +1544,7 @@ class PMCreate(BaseModel):
 
 @app.post("/api/payment-methods")
 def create_payment_method(body: PMCreate, user=Depends(require_admin)):
-    pid = f"pm_{uuid.uuid4().hex[:8]}"
+    pid = f"pm_{uuid4().hex[:8]}"
     with get_db() as db:
         mx = db.execute("SELECT MAX(sort_order) as mx FROM payment_methods").fetchone()["mx"] or 0
         db.execute("INSERT INTO payment_methods (id, name, bank_group, is_active, sort_order) VALUES (?,?,?,1,?)",
@@ -1101,6 +1708,7 @@ def serve():
 @app.on_event("startup")
 def startup():
     init_db()
+    auto_migrate()
     if not is_seeded():
         print("  \U0001f331 Seeding..."); seed_db()
         print(f"  \u2705 Done")
