@@ -237,6 +237,10 @@ def init_db():
             investment_date TEXT NOT NULL,
             payment_date TEXT DEFAULT '',
             investment_type TEXT DEFAULT 'equity',
+            equity_pct REAL DEFAULT 0,
+            sub_type TEXT DEFAULT '',
+            term_months INTEGER DEFAULT 0,
+            annual_rate REAL DEFAULT 0,
             notes TEXT DEFAULT '',
             created_at TEXT
         );
@@ -452,6 +456,10 @@ def auto_migrate():
         ("loans", "interest_start_month", "TEXT DEFAULT ''"),
         ("loans", "opening_balance", "REAL DEFAULT 0"),
         ("loans", "loan_type", "TEXT DEFAULT 'bank'"),
+        ("investments", "equity_pct", "REAL DEFAULT 0"),
+        ("investments", "sub_type", "TEXT DEFAULT ''"),
+        ("investments", "term_months", "INTEGER DEFAULT 0"),
+        ("investments", "annual_rate", "REAL DEFAULT 0"),
         ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
@@ -2414,6 +2422,10 @@ class InvestmentIn(BaseModel):
     investmentDate: str
     paymentDate: str = ""
     investmentType: str = "equity"
+    equityPct: float = 0
+    subType: str = ""
+    termMonths: int = 0
+    annualRate: float = 0
     notes: str = ""
 
 @app.post("/api/investments")
@@ -2421,16 +2433,18 @@ def add_investment(b: InvestmentIn, user=Depends(require_admin)):
     iid = f"inv_{uuid4().hex[:8]}"
     now = datetime.now().isoformat()
     with get_db() as db:
-        db.execute("""INSERT INTO investments (id,investor,amount,currency,investment_date,payment_date,investment_type,notes,created_at)
-                     VALUES (?,?,?,?,?,?,?,?,?)""",
-                   (iid, b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, b.investmentType, b.notes, now))
+        db.execute("""INSERT INTO investments (id,investor,amount,currency,investment_date,payment_date,investment_type,equity_pct,sub_type,term_months,annual_rate,notes,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (iid, b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, 
+                    b.investmentType, b.equityPct, b.subType, b.termMonths, b.annualRate, b.notes, now))
     return {"ok": True, "id": iid}
 
 @app.put("/api/investments/{iid}")
 def upd_investment(iid: str, b: InvestmentIn, user=Depends(require_admin)):
     with get_db() as db:
-        db.execute("""UPDATE investments SET investor=?,amount=?,currency=?,investment_date=?,payment_date=?,investment_type=?,notes=? WHERE id=?""",
-                   (b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, b.investmentType, b.notes, iid))
+        db.execute("""UPDATE investments SET investor=?,amount=?,currency=?,investment_date=?,payment_date=?,investment_type=?,equity_pct=?,sub_type=?,term_months=?,annual_rate=?,notes=? WHERE id=?""",
+                   (b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, 
+                    b.investmentType, b.equityPct, b.subType, b.termMonths, b.annualRate, b.notes, iid))
     return {"ok": True}
 
 @app.delete("/api/investments/{iid}")
@@ -2444,9 +2458,11 @@ def get_investments(user=Depends(require_admin)):
     with get_db() as db:
         rows = db.execute("SELECT * FROM investments ORDER BY investment_date").fetchall()
     return [{"id":r["id"],"investor":r["investor"],"amount":r["amount"],
-             "currency":r.get("currency","ILS"),"investmentDate":r["investment_date"],
-             "paymentDate":r.get("payment_date",""),"investmentType":r.get("investment_type","equity"),
-             "notes":r.get("notes","")} for r in rows]
+             "currency":r["currency"] or "ILS","investmentDate":r["investment_date"],
+             "paymentDate":r["payment_date"] or "","investmentType":r["investment_type"] or "equity",
+             "equityPct":r["equity_pct"] or 0,"subType":r["sub_type"] or "",
+             "termMonths":r["term_months"] or 0,"annualRate":r["annual_rate"] or 0,
+             "notes":r["notes"] or ""} for r in rows]
 
 # OPENING BALANCES (prior year payroll liabilities)
 # ══════════════════════════════════════════

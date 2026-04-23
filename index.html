@@ -4226,28 +4226,39 @@ function renderInvestmentsTab(){
   var el=document.getElementById('st-sinvest');if(!el)return;
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--txM)">Loading...</div>';
   authFetch('/api/investments').then(function(r){return r.json()}).then(function(investments){
-    var typeLabels={equity:'Equity',convertible:'Convertible Note',safe:'SAFE',grant:'Grant'};
-    var totalAmt=investments.reduce(function(s,inv){return s+inv.amount},0);
+    var typeLabels={equity:'Equity',financial:'Financial'};
+    var subLabels={securities:'Securities',deposit:'Bank Deposit'};
+    var equityInv=investments.filter(function(inv){return inv.investmentType==='equity'});
+    var finInv=investments.filter(function(inv){return inv.investmentType==='financial'});
+    
     var ih='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Investments <button class="btn-p" id="btnAddInvest" style="padding:6px 14px;font-size:11px">+ Add Investment</button></div>';
-    if(totalAmt>0) ih+='<div style="padding:6px 14px;font-size:12px;color:var(--txM)">Total Invested: <span class="mono" style="font-weight:700;color:var(--ac)">\u20AA'+Math.round(totalAmt).toLocaleString()+'</span></div>';
-    ih+='<div style="overflow-x:auto"><table><thead><tr><th>Investor</th><th>Amount</th><th>Type</th><th>Date</th><th>Payment</th><th>Notes</th><th></th></tr></thead><tbody>';
-    if(investments.length===0) ih+='<tr><td colspan="7" style="text-align:center;color:var(--txM);padding:20px">No investments yet</td></tr>';
-    investments.forEach(function(inv){
-      var sym=inv.currency==='ILS'?'\u20AA':inv.currency==='EUR'?'\u20AC':'$';
-      ih+='<tr>';
-      ih+='<td style="font-weight:600">'+inv.investor+'</td>';
-      ih+='<td class="mono" style="color:var(--ac)">'+sym+Math.round(inv.amount).toLocaleString()+'</td>';
-      ih+='<td style="font-size:11px">'+(typeLabels[inv.investmentType]||inv.investmentType)+'</td>';
-      ih+='<td style="font-size:11px;color:var(--txD)">'+inv.investmentDate+'</td>';
-      ih+='<td style="font-size:11px;color:var(--gn)">'+(inv.paymentDate||'same')+'</td>';
-      ih+='<td style="font-size:11px;color:var(--txM)">'+(inv.notes||'\u2014')+'</td>';
-      ih+='<td><button class="btn-ghost inv-edit" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--ac)">\u270E</button> <button class="btn-ghost inv-del2" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--rd)">\u2715</button></td>';
-      ih+='</tr>';
-    });
-    ih+='</tbody></table></div></div>';
+    
+    function renderInvSection(title,list){
+      ih+='<div style="padding:6px 14px;font-size:11px;font-weight:700;color:var(--txM);background:var(--cardH)">'+title+'</div>';
+      ih+='<div style="overflow-x:auto"><table><thead><tr><th>Investor</th><th>Amount</th><th>Details</th><th>Date</th><th>Payment</th><th></th></tr></thead><tbody>';
+      if(list.length===0) ih+='<tr><td colspan="6" style="text-align:center;color:var(--txM);padding:12px">None</td></tr>';
+      list.forEach(function(inv){
+        var sym=inv.currency==='ILS'?'\u20AA':inv.currency==='EUR'?'\u20AC':'$';
+        var detail='';
+        if(inv.investmentType==='equity') detail=inv.equityPct?inv.equityPct+'% equity':'\u2014';
+        else if(inv.subType==='deposit') detail='Deposit '+inv.termMonths+'mo @ '+inv.annualRate+'%';
+        else detail=subLabels[inv.subType]||inv.subType||'\u2014';
+        ih+='<tr>';
+        ih+='<td style="font-weight:600">'+inv.investor+'</td>';
+        ih+='<td class="mono" style="color:var(--ac)">'+sym+Math.round(inv.amount).toLocaleString()+'</td>';
+        ih+='<td style="font-size:11px">'+detail+'</td>';
+        ih+='<td style="font-size:11px;color:var(--txD)">'+inv.investmentDate+'</td>';
+        ih+='<td style="font-size:11px;color:var(--gn)">'+(inv.paymentDate||'same')+'</td>';
+        ih+='<td><button class="btn-ghost inv-edit2" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--ac)">\u270E</button> <button class="btn-ghost inv-del2" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--rd)">\u2715</button></td>';
+        ih+='</tr>';
+      });
+      ih+='</tbody></table></div>';
+    }
+    renderInvSection('Equity Investments',equityInv);
+    renderInvSection('Financial Investments',finInv);
+    ih+='</div>';
     el.innerHTML=ih;
     
-    // Delete
     el.querySelectorAll('.inv-del2').forEach(function(btn){
       btn.addEventListener('click',function(){
         if(!confirm('Delete investment?'))return;
@@ -4255,69 +4266,98 @@ function renderInvestmentsTab(){
       });
     });
     
+    function buildInvForm(prefix,inv){
+      var isEdit=!!inv;
+      var fh='<div class="modal-grid">';
+      fh+='<div class="mf"><label>Investor *</label><input id="'+prefix+'-name" value="'+(inv?inv.investor:'')+'"></div>';
+      fh+='<div class="mf"><label>Amount *</label><input id="'+prefix+'-amt" type="number" value="'+(inv?inv.amount:'')+'"></div>';
+      fh+='<div class="mf"><label>Currency</label><select id="'+prefix+'-cur"><option value="ILS"'+((inv?inv.currency:'ILS')==='ILS'?' selected':'')+'>\u20AA ILS</option><option value="USD"'+((inv?inv.currency:'')==='USD'?' selected':'')+'>$ USD</option><option value="EUR"'+((inv?inv.currency:'')==='EUR'?' selected':'')+'>\u20AC EUR</option></select></div>';
+      fh+='<div class="mf"><label>Type *</label><select id="'+prefix+'-type"><option value="equity"'+((inv?inv.investmentType:'equity')==='equity'?' selected':'')+'>Equity</option><option value="financial"'+((inv?inv.investmentType:'')==='financial'?' selected':'')+'>Financial</option></select></div>';
+      fh+='<div class="mf"><label>Investment Date *</label><input id="'+prefix+'-date" type="date" value="'+(inv?inv.investmentDate:'2026-01-01')+'"></div>';
+      fh+='<div class="mf"><label>Payment Date (CF)</label><input id="'+prefix+'-pay" type="date" value="'+(inv?inv.paymentDate:'')+'"><div class="hint">When money arrives</div></div>';
+      fh+='</div>';
+      // Equity fields
+      fh+='<div id="'+prefix+'-equity-fields" style="'+((!inv||inv.investmentType==='equity')?'':'display:none')+'">';
+      fh+='<div class="modal-grid"><div class="mf"><label>Equity % in Company</label><input id="'+prefix+'-eqpct" type="number" step="0.01" value="'+(inv?inv.equityPct||'':'')+'"></div></div></div>';
+      // Financial fields
+      fh+='<div id="'+prefix+'-fin-fields" style="'+((inv&&inv.investmentType==='financial')?'':'display:none')+'">';
+      fh+='<div class="modal-grid">';
+      fh+='<div class="mf"><label>Sub Type</label><select id="'+prefix+'-sub"><option value="securities"'+((inv&&inv.subType==='securities')?' selected':'')+'>Securities</option><option value="deposit"'+((inv&&inv.subType==='deposit')?' selected':'')+'>Bank Deposit</option></select></div>';
+      fh+='<div id="'+prefix+'-deposit-fields" style="'+((inv&&inv.subType==='deposit')?'':'display:none')+'"><div class="modal-grid">';
+      fh+='<div class="mf"><label>Term (months)</label><input id="'+prefix+'-term" type="number" value="'+(inv?inv.termMonths||'':'')+'"></div>';
+      fh+='<div class="mf"><label>Annual Rate %</label><input id="'+prefix+'-rate" type="number" step="0.1" value="'+(inv?inv.annualRate||'':'')+'"></div>';
+      fh+='</div></div>';
+      fh+='</div></div>';
+      fh+='<div class="modal-grid"><div class="mf"><label>Notes</label><input id="'+prefix+'-notes" value="'+(inv?inv.notes:'')+'"></div></div>';
+      return fh;
+    }
+    
+    function wireInvFormToggles(prefix){
+      document.getElementById(prefix+'-type').addEventListener('change',function(){
+        document.getElementById(prefix+'-equity-fields').style.display=this.value==='equity'?'':'none';
+        document.getElementById(prefix+'-fin-fields').style.display=this.value==='financial'?'':'none';
+      });
+      var subSel=document.getElementById(prefix+'-sub');
+      if(subSel) subSel.addEventListener('change',function(){
+        document.getElementById(prefix+'-deposit-fields').style.display=this.value==='deposit'?'':'none';
+      });
+    }
+    
+    function getInvFormData(prefix){
+      var t=document.getElementById(prefix+'-type').value;
+      return {
+        investor:document.getElementById(prefix+'-name').value,
+        amount:parseFloat(document.getElementById(prefix+'-amt').value),
+        currency:document.getElementById(prefix+'-cur').value,
+        investmentType:t,
+        investmentDate:document.getElementById(prefix+'-date').value,
+        paymentDate:document.getElementById(prefix+'-pay').value||'',
+        equityPct:t==='equity'?parseFloat(document.getElementById(prefix+'-eqpct').value)||0:0,
+        subType:t==='financial'?document.getElementById(prefix+'-sub').value:'',
+        termMonths:t==='financial'?parseInt(document.getElementById(prefix+'-term').value)||0:0,
+        annualRate:t==='financial'?parseFloat(document.getElementById(prefix+'-rate').value)||0:0,
+        notes:document.getElementById(prefix+'-notes').value
+      };
+    }
+    
     // Edit
-    el.querySelectorAll('.inv-edit').forEach(function(btn){
+    el.querySelectorAll('.inv-edit2').forEach(function(btn){
       btn.addEventListener('click',function(){
         var inv=investments.find(function(x){return x.id===btn.dataset.iid});if(!inv)return;
-        var eh='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+        var eh='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:500px">';
         eh+='<div class="modal-head"><h2>Edit Investment</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
-        eh+='<div class="modal-body"><div class="modal-grid">';
-        eh+='<div class="mf"><label>Investor</label><input id="einv-name" value="'+inv.investor+'"></div>';
-        eh+='<div class="mf"><label>Amount</label><input id="einv-amt" type="number" value="'+inv.amount+'"></div>';
-        eh+='<div class="mf"><label>Currency</label><select id="einv-cur"><option value="ILS"'+(inv.currency==='ILS'?' selected':'')+'>\u20AA ILS</option><option value="USD"'+(inv.currency==='USD'?' selected':'')+'>$ USD</option><option value="EUR"'+(inv.currency==='EUR'?' selected':'')+'>\u20AC EUR</option></select></div>';
-        eh+='<div class="mf"><label>Type</label><select id="einv-type"><option value="equity"'+(inv.investmentType==='equity'?' selected':'')+'>Equity</option><option value="convertible"'+(inv.investmentType==='convertible'?' selected':'')+'>Convertible Note</option><option value="safe"'+(inv.investmentType==='safe'?' selected':'')+'>SAFE</option><option value="grant"'+(inv.investmentType==='grant'?' selected':'')+'>Grant</option></select></div>';
-        eh+='<div class="mf"><label>Investment Date</label><input id="einv-date" type="date" value="'+inv.investmentDate+'"></div>';
-        eh+='<div class="mf"><label>Payment Date (CF)</label><input id="einv-pay" type="date" value="'+(inv.paymentDate||'')+'"></div>';
-        eh+='<div class="mf"><label>Notes</label><input id="einv-notes" value="'+(inv.notes||'')+'"></div>';
-        eh+='</div></div>';
+        eh+='<div class="modal-body">'+buildInvForm('einv',inv)+'</div>';
         eh+='<div class="modal-foot"><button class="btn-ghost" id="einvX">Cancel</button><button class="btn-p" id="einvSave">Save</button></div></div></div>';
         document.body.insertAdjacentHTML('beforeend',eh);
         document.getElementById('modalClose').addEventListener('click',closeModal);
         document.getElementById('einvX').addEventListener('click',closeModal);
         document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+        wireInvFormToggles('einv');
         document.getElementById('einvSave').addEventListener('click',function(){
-          authFetch('/api/investments/'+inv.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-            investor:document.getElementById('einv-name').value,
-            amount:parseFloat(document.getElementById('einv-amt').value),
-            currency:document.getElementById('einv-cur').value,
-            investmentType:document.getElementById('einv-type').value,
-            investmentDate:document.getElementById('einv-date').value,
-            paymentDate:document.getElementById('einv-pay').value||'',
-            notes:document.getElementById('einv-notes').value
-          })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated');loadAll().then(function(){renderInvestmentsTab()})}});
+          var d=getInvFormData('einv');
+          if(!d.investor||!d.amount){toast('Fill required fields');return}
+          authFetch('/api/investments/'+inv.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+            .then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated');loadAll().then(function(){renderInvestmentsTab()})}});
         });
       });
     });
     
     // Add
     document.getElementById('btnAddInvest').addEventListener('click',function(){
-      var ah='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+      var ah='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:500px">';
       ah+='<div class="modal-head"><h2>Add Investment</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
-      ah+='<div class="modal-body"><div class="modal-grid">';
-      ah+='<div class="mf"><label>Investor *</label><input id="ninv-name" placeholder="e.g. Investor Name"></div>';
-      ah+='<div class="mf"><label>Amount *</label><input id="ninv-amt" type="number" placeholder="500000"></div>';
-      ah+='<div class="mf"><label>Currency</label><select id="ninv-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
-      ah+='<div class="mf"><label>Type</label><select id="ninv-type"><option value="equity">Equity</option><option value="convertible">Convertible Note</option><option value="safe">SAFE</option><option value="grant">Grant</option></select></div>';
-      ah+='<div class="mf"><label>Investment Date *</label><input id="ninv-date" type="date" value="2026-01-01"></div>';
-      ah+='<div class="mf"><label>Payment Date (CF)</label><input id="ninv-pay" type="date"><div class="hint">When money arrives. Empty = same as investment date</div></div>';
-      ah+='<div class="mf"><label>Notes</label><input id="ninv-notes" placeholder="Optional"></div>';
-      ah+='</div></div>';
+      ah+='<div class="modal-body">'+buildInvForm('ninv',null)+'</div>';
       ah+='<div class="modal-foot"><button class="btn-ghost" id="ninvX">Cancel</button><button class="btn-p" id="ninvSave">Add Investment</button></div></div></div>';
       document.body.insertAdjacentHTML('beforeend',ah);
       document.getElementById('modalClose').addEventListener('click',closeModal);
       document.getElementById('ninvX').addEventListener('click',closeModal);
       document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+      wireInvFormToggles('ninv');
       document.getElementById('ninvSave').addEventListener('click',function(){
-        var name=document.getElementById('ninv-name').value;
-        var amt=parseFloat(document.getElementById('ninv-amt').value);
-        var dt=document.getElementById('ninv-date').value;
-        if(!name||!amt||!dt){toast('Fill required fields');return}
-        authFetch('/api/investments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          investor:name,amount:amt,currency:document.getElementById('ninv-cur').value,
-          investmentType:document.getElementById('ninv-type').value,
-          investmentDate:dt,paymentDate:document.getElementById('ninv-pay').value||'',
-          notes:document.getElementById('ninv-notes').value
-        })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Investment added');loadAll().then(function(){renderInvestmentsTab()})}});
+        var d=getInvFormData('ninv');
+        if(!d.investor||!d.amount||!d.investmentDate){toast('Fill required fields');return}
+        authFetch('/api/investments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+          .then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Investment added');loadAll().then(function(){renderInvestmentsTab()})}});
       });
     });
   });
