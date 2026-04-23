@@ -229,14 +229,35 @@ def init_db():
             notes TEXT DEFAULT '',
             created_at TEXT
         );
-        CREATE TABLE IF NOT EXISTS historical_monthly (
+        CREATE TABLE IF NOT EXISTS pl_manual (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             year INTEGER NOT NULL,
             month INTEGER NOT NULL,
             category TEXT NOT NULL,
+            section TEXT NOT NULL DEFAULT 'opex',
             amount REAL DEFAULT 0,
-            source TEXT DEFAULT 'upload',
             UNIQUE(year, month, category)
+        );
+        CREATE TABLE IF NOT EXISTS pl_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            section TEXT NOT NULL DEFAULT 'opex',
+            sort_order INTEGER DEFAULT 100
+        );
+        CREATE TABLE IF NOT EXISTS bs_manual (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            section TEXT NOT NULL DEFAULT 'assets',
+            amount REAL DEFAULT 0,
+            UNIQUE(year, month, category)
+        );
+        CREATE TABLE IF NOT EXISTS bs_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            section TEXT NOT NULL DEFAULT 'assets',
+            sort_order INTEGER DEFAULT 100
         );
         CREATE TABLE IF NOT EXISTS investments (
             id TEXT PRIMARY KEY,
@@ -2474,172 +2495,161 @@ def get_investments(user=Depends(require_admin)):
              "notes":r["notes"] or ""} for r in rows]
 
 # ══════════════════════════════════════════
-# HISTORICAL DATA (2025 import)
 # ══════════════════════════════════════════
-from fastapi import File, UploadFile
-import io, csv
+# MANUAL P&L & BS (multi-year)
+# ══════════════════════════════════════════
 
-@app.post("/api/upload-historical")
-async def upload_historical(file: UploadFile = File(...), user=Depends(require_admin)):
-    """Parse P&L or BS CSV and store monthly data."""
-    content = await file.read()
-    text = content.decode('utf-8-sig')
-    reader = list(csv.reader(io.StringIO(text)))
-    
-    def parse_num(s):
-        if not s: return 0
-        try: return float(s.replace(',','').replace('"',''))
-        except: return 0
-    
-    # Detect file type
-    is_pl = any('P&L' in str(row) for row in reader[:5])
-    is_bs = any('Bank' in str(row) for row in reader[:5]) or 'BS' in (file.filename or '')
-    
-    # USD columns: months 01-10 at positions 7,9,11,13,15,17,19,21,23,25
-    usd_cols = [7, 9, 11, 13, 15, 17, 19, 21, 23, 25]
-    year = 2025
-    results = {}
-    
-    if is_pl or 'P_L' in (file.filename or ''):
-        # P&L parsing — find key Total rows
-        key_rows_map = {}
-        current_section = None
-        for i, row in enumerate(reader):
-            if len(row) < 26: continue
-            col0 = (row[0] or '').strip()
-            col3 = (row[3] or '').strip()
-            
-            # Track sections
-            if 'Management' in col0 and 'Total' not in col0: current_section = 'mgmt'
-            elif col0.startswith('R&D') and 'Expenses' not in col0 and 'Total' not in col0: current_section = 'rd'
-            elif col0.startswith('S&M') and 'Expenses' not in col0 and 'Total' not in col0: current_section = 'sm'
-            elif 'G&M Expenses' in col0 and 'Total' not in col0: current_section = 'gm'
-            elif 'Traveling' in col0 and 'Total' not in col0: current_section = 'travel'
-            elif 'S&M Expenses' in col0 and 'Total' not in col0: current_section = 'sm_exp'
-            elif 'R&D Expenses' in col0 and 'Total' not in col0: current_section = 'rd_exp'
-            elif 'Financing' in col0 and 'Total' not in col0: current_section = 'finance'
-            
-            if col3 == 'Total':
-                vals = [parse_num(row[c]) if c < len(row) else 0 for c in usd_cols]
-                
-                # Map by position
-                if i+1 == 15 or (not key_rows_map.get('revenue') and i < 16 and all(v >= 0 for v in vals) and sum(abs(v) for v in vals) > 10000):
-                    key_rows_map['revenue'] = vals
-                elif current_section == 'mgmt' and 'mgmt_labor' not in key_rows_map:
-                    key_rows_map['mgmt_labor'] = vals
-                elif current_section == 'rd' and 'rd_labor' not in key_rows_map:
-                    key_rows_map['rd_labor'] = vals
-                elif current_section == 'sm' and 'sm_labor' not in key_rows_map:
-                    key_rows_map['sm_labor'] = vals
-                elif current_section == 'gm' and 'gm_expenses' not in key_rows_map:
-                    key_rows_map['gm_expenses'] = vals
-                elif current_section == 'travel' and 'travel' not in key_rows_map:
-                    key_rows_map['travel'] = vals
-                elif current_section == 'sm_exp' and 'sm_expenses' not in key_rows_map:
-                    key_rows_map['sm_expenses'] = vals
-                elif current_section == 'rd_exp' and 'rd_expenses' not in key_rows_map:
-                    key_rows_map['rd_expenses'] = vals
-                elif current_section == 'finance' and 'finance' not in key_rows_map:
-                    key_rows_map['finance'] = vals
-                
-                # Grand total is the last Total row
-                if col0 == 'Total':
-                    key_rows_map['grand_total'] = vals
-        
-        results = key_rows_map
-        
-        # Store in DB
-        categories = {
-            'pl_revenue': 'revenue',
-            'pl_mgmt_labor': 'mgmt_labor',
-            'pl_rd_labor': 'rd_labor', 
-            'pl_sm_labor': 'sm_labor',
-            'pl_gm_expenses': 'gm_expenses',
-            'pl_travel': 'travel',
-            'pl_sm_expenses': 'sm_expenses',
-            'pl_rd_expenses': 'rd_expenses',
-            'pl_finance': 'finance',
-            'pl_grand_total': 'grand_total',
-        }
-        
-        with get_db() as db:
-            count = 0
-            for db_cat, key in categories.items():
-                vals = key_rows_map.get(key, [0]*10)
-                for mi, val in enumerate(vals):
-                    db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)",
-                               (year, mi+1, db_cat, val, 'upload'))
-                    count += 1
-            
-            # Also compute derived categories
-            for mi in range(10):
-                rev = key_rows_map.get('revenue', [0]*10)[mi]
-                mgmt = key_rows_map.get('mgmt_labor', [0]*10)[mi]
-                rd = key_rows_map.get('rd_labor', [0]*10)[mi]
-                sm = key_rows_map.get('sm_labor', [0]*10)[mi]
-                total_labor = mgmt + rd + sm
-                
-                gm = key_rows_map.get('gm_expenses', [0]*10)[mi]
-                travel = key_rows_map.get('travel', [0]*10)[mi]
-                sm_exp = key_rows_map.get('sm_expenses', [0]*10)[mi]
-                rd_exp = key_rows_map.get('rd_expenses', [0]*10)[mi]
-                total_vendors = gm + travel + sm_exp + rd_exp
-                
-                fin = key_rows_map.get('finance', [0]*10)[mi]
-                
-                cogs = rd + rd_exp  # R&D labor + R&D vendor expenses
-                opex = mgmt + sm + gm + travel + sm_exp
-                gross_profit = rev + cogs  # cogs is negative
-                net_income = rev + total_labor + total_vendors + fin
-                
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_total_labor', total_labor, 'derived'))
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_total_vendors', total_vendors, 'derived'))
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_cogs', cogs, 'derived'))
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_opex', opex, 'derived'))
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_gross_profit', gross_profit, 'derived'))
-                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_net_income', net_income, 'derived'))
-        
-        return {"ok": True, "type": "pl", "months": 10, "categories": list(key_rows_map.keys()), "count": count}
-    
-    elif is_bs or 'BS' in (file.filename or ''):
-        # BS parsing — find group totals
-        bs_groups = {}
-        for i, row in enumerate(reader):
-            if len(row) < 26: continue
-            # Look for total rows (column 5 has a number, column 6 has ILS, column 7 has USD)
-            r0 = (row[0] or '').strip()
-            if r0.startswith('Total for Group') or (not r0 and not row[1] and not row[2] and not row[3] and not row[4] and row[5]):
-                # Get group name from nearby rows
-                vals = [parse_num(row[c]) if c < len(row) else 0 for c in usd_cols]
-                if sum(abs(v) for v in vals) > 0:
-                    # Store with line number as key
-                    bs_groups[f"bs_line_{i+1}"] = vals
-        
-        with get_db() as db:
-            count = 0
-            for cat, vals in bs_groups.items():
-                for mi, val in enumerate(vals):
-                    db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)",
-                               (year, mi+1, cat, val, 'upload'))
-                    count += 1
-        
-        return {"ok": True, "type": "bs", "months": 10, "groups": len(bs_groups), "count": count}
-    
-    return {"ok": False, "error": "Could not detect file type"}
+PL_DEFAULT_CATS = [
+    ("Revenue", "revenue", 10),
+    ("R&D Labor", "cogs", 20),
+    ("R&D Vendors", "cogs", 21),
+    ("Management Labor", "opex", 30),
+    ("S&M Labor", "opex", 31),
+    ("G&A Expenses", "opex", 40),
+    ("Legal", "opex", 41),
+    ("Cloud", "opex", 42),
+    ("Insurance", "opex", 43),
+    ("Training", "opex", 44),
+    ("Rent", "opex", 45),
+    ("Traveling", "opex", 46),
+    ("S&M Expenses", "opex", 47),
+    ("Interest", "finance", 60),
+    ("Bank Fees", "finance", 61),
+]
 
-@app.get("/api/historical/{year}")
-def get_historical(year: int, user=Depends(require_admin)):
+BS_DEFAULT_CATS = [
+    ("Cash & Banks", "assets", 10),
+    ("Accounts Receivable", "assets", 20),
+    ("Deposits", "assets", 30),
+    ("Accounts Payable", "liabilities", 40),
+    ("Payroll Liabilities", "liabilities", 50),
+    ("Loans Outstanding", "liabilities", 60),
+    ("Invested Capital", "equity", 70),
+    ("Retained Earnings", "equity", 80),
+]
+
+def ensure_default_categories():
     with get_db() as db:
-        rows = db.execute("SELECT month, category, amount FROM historical_monthly WHERE year=? ORDER BY month, category", (year,)).fetchall()
-    result = {}
+        for name, section, sort in PL_DEFAULT_CATS:
+            db.execute("INSERT OR IGNORE INTO pl_categories (name, section, sort_order) VALUES (?,?,?)", (name, section, sort))
+        for name, section, sort in BS_DEFAULT_CATS:
+            db.execute("INSERT OR IGNORE INTO bs_categories (name, section, sort_order) VALUES (?,?,?)", (name, section, sort))
+
+@app.get("/api/pl-categories")
+def get_pl_categories(user=Depends(require_admin)):
+    ensure_default_categories()
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM pl_categories ORDER BY sort_order, name").fetchall()
+    return [{"id": r["id"], "name": r["name"], "section": r["section"], "sortOrder": r["sort_order"]} for r in rows]
+
+class PLCategoryIn(BaseModel):
+    name: str
+    section: str = "opex"
+
+@app.post("/api/pl-categories")
+def add_pl_category(b: PLCategoryIn, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR IGNORE INTO pl_categories (name, section, sort_order) VALUES (?,?,?)", (b.name, b.section, 100))
+    return {"ok": True}
+
+@app.delete("/api/pl-categories/{cid}")
+def del_pl_category(cid: int, user=Depends(require_admin)):
+    with get_db() as db:
+        row = db.execute("SELECT name FROM pl_categories WHERE id=?", (cid,)).fetchone()
+        if row:
+            db.execute("DELETE FROM pl_categories WHERE id=?", (cid,))
+            db.execute("DELETE FROM pl_manual WHERE category=?", (row["name"],))
+    return {"ok": True}
+
+@app.get("/api/pl-data/{year}")
+def get_pl_data(year: int, user=Depends(require_admin)):
+    ensure_default_categories()
+    with get_db() as db:
+        cats = db.execute("SELECT * FROM pl_categories ORDER BY sort_order, name").fetchall()
+        rows = db.execute("SELECT month, category, amount FROM pl_manual WHERE year=?", (year,)).fetchall()
+    data = {}
     for r in rows:
-        cat = r["category"]
-        if cat not in result:
-            result[cat] = [0.0] * 12
-        mi = r["month"] - 1
-        if 0 <= mi < 12:
-            result[cat][mi] = r["amount"]
-    return {"year": year, "data": result}
+        data.setdefault(r["category"], {})[r["month"]] = r["amount"]
+    result = []
+    for c in cats:
+        months = {}
+        for mi in range(1, 13):
+            months[str(mi)] = data.get(c["name"], {}).get(mi, 0)
+        result.append({"name": c["name"], "section": c["section"], "months": months})
+    return {"year": year, "categories": result}
+
+class PLDataUpdate(BaseModel):
+    year: int
+    category: str
+    month: int
+    amount: float
+
+@app.put("/api/pl-data")
+def set_pl_data(b: PLDataUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        cat = db.execute("SELECT section FROM pl_categories WHERE name=?", (b.category,)).fetchone()
+        section = cat["section"] if cat else "opex"
+        db.execute("INSERT OR REPLACE INTO pl_manual (year, month, category, section, amount) VALUES (?,?,?,?,?)",
+                   (b.year, b.month, b.category, section, b.amount))
+    return {"ok": True}
+
+@app.get("/api/bs-categories")
+def get_bs_categories(user=Depends(require_admin)):
+    ensure_default_categories()
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM bs_categories ORDER BY sort_order, name").fetchall()
+    return [{"id": r["id"], "name": r["name"], "section": r["section"], "sortOrder": r["sort_order"]} for r in rows]
+
+class BSCategoryIn(BaseModel):
+    name: str
+    section: str = "assets"
+
+@app.post("/api/bs-categories")
+def add_bs_category(b: BSCategoryIn, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR IGNORE INTO bs_categories (name, section, sort_order) VALUES (?,?,?)", (b.name, b.section, 100))
+    return {"ok": True}
+
+@app.delete("/api/bs-categories/{cid}")
+def del_bs_category(cid: int, user=Depends(require_admin)):
+    with get_db() as db:
+        row = db.execute("SELECT name FROM bs_categories WHERE id=?", (cid,)).fetchone()
+        if row:
+            db.execute("DELETE FROM bs_categories WHERE id=?", (cid,))
+            db.execute("DELETE FROM bs_manual WHERE category=?", (row["name"],))
+    return {"ok": True}
+
+@app.get("/api/bs-data/{year}")
+def get_bs_data(year: int, user=Depends(require_admin)):
+    ensure_default_categories()
+    with get_db() as db:
+        cats = db.execute("SELECT * FROM bs_categories ORDER BY sort_order, name").fetchall()
+        rows = db.execute("SELECT month, category, amount FROM bs_manual WHERE year=?", (year,)).fetchall()
+    data = {}
+    for r in rows:
+        data.setdefault(r["category"], {})[r["month"]] = r["amount"]
+    result = []
+    for c in cats:
+        months = {}
+        for mi in range(1, 13):
+            months[str(mi)] = data.get(c["name"], {}).get(mi, 0)
+        result.append({"name": c["name"], "section": c["section"], "months": months})
+    return {"year": year, "categories": result}
+
+class BSDataUpdate(BaseModel):
+    year: int
+    category: str
+    month: int
+    amount: float
+
+@app.put("/api/bs-data")
+def set_bs_data(b: BSDataUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        cat = db.execute("SELECT section FROM bs_categories WHERE name=?", (b.category,)).fetchone()
+        section = cat["section"] if cat else "assets"
+        db.execute("INSERT OR REPLACE INTO bs_manual (year, month, category, section, amount) VALUES (?,?,?,?,?)",
+                   (b.year, b.month, b.category, section, b.amount))
+    return {"ok": True}
 
 # OPENING BALANCES (prior year payroll liabilities)
 # ══════════════════════════════════════════

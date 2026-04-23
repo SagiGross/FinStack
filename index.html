@@ -812,225 +812,337 @@ function renderFinExpenses(){
   ]},options:{scales:{y:{stacked:true,ticks:{callback:function(v){return fmt(v)}}}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
 }
 
+var plYear=2026;
 function renderPnL(){
   var el=document.getElementById('st-pnl');if(!el)return;
-  var d=D.summary;var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  
   var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
-  h+='<h2 style="margin:0">Profit & Loss Statement — FY2026</h2>';
-  h+='<label class="btn-ghost" style="padding:6px 14px;font-size:11px;cursor:pointer">\u2191 Upload 2025 CSV<input type="file" accept=".csv" id="plUpload" style="display:none"></label>';
-  h+='</div>';
+  h+='<h2 style="margin:0">Profit & Loss Statement</h2>';
+  h+='<div style="display:flex;gap:8px;align-items:center">';
+  h+='<select id="plYearSel" style="padding:6px 12px;font-size:13px;font-weight:700;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px">';
+  for(var y=2025;y<=2027;y++) h+='<option value="'+y+'"'+(y===plYear?' selected':'')+'>FY '+y+'</option>';
+  h+='</select>';
+  if(plYear!==2026) h+='<button class="btn-p" id="plAddCat" style="padding:6px 14px;font-size:11px">+ Add Category</button>';
+  h+='</div></div>';
   
-  // Check if 2025 data exists
-  h+='<div id="pl2025Section"></div>';
-  
-  h+='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px"><thead><tr style="font-size:11px"><th style="text-align:left;min-width:180px"></th>';
-  months.forEach(function(m){h+='<th style="min-width:75px">'+m+'</th>'});
-  h+='<th style="min-width:90px;font-weight:800">Total</th></tr></thead><tbody>';
-
-  function row(label,vals,style,isTotal){
-    var s=style||'';var cls=isTotal?'font-weight:800;border-top:2px solid var(--bd);':'';
-    var total=vals.reduce(function(a,b){return a+b},0);
-    h+='<tr style="'+cls+s+'"><td style="font-weight:'+(isTotal?'800':'600')+';padding-left:'+(label.startsWith('  ')?'24px':'0')+'">'+label.trim()+'</td>';
-    vals.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:12px;'+(finConv(v)<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
-    h+='<td class="mono" style="text-align:right;font-weight:800;font-size:12px;'+(finConv(total)<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
-  }
-
-  h+='<tr><td colspan="14" style="font-size:10px;color:var(--gn);padding:6px 0 2px;font-weight:700">REVENUE</td></tr>';
-  // Revenue by category
-  var allRevCats={};
-  d.forEach(function(m){var cats=m.revCats||{};Object.keys(cats).forEach(function(cat){allRevCats[cat]=true})});
-  Object.keys(allRevCats).sort().forEach(function(cat){
-    var vals=d.map(function(m){return(m.revCats||{})[cat]||0});
-    if(vals.some(function(v){return v>0})) row('  '+cat,vals,'color:var(--gn)');
-  });
-  var revenue=d.map(function(m){return m.revenue});
-  row('Total Revenue',revenue,'color:var(--gn)',true);
-
-  h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:6px 0 2px;font-weight:700">COST OF GOODS SOLD</td></tr>';
-  var cogsRD=d.map(function(m){return m.lab['R&D']||0});
-  var cogsVd=d.map(function(m){return m.vd['R&D']||0});
-  var totalCogs=d.map(function(m){return m.cogs});
-  row('  R&D Labor',cogsRD);
-  row('  R&D Vendors',cogsVd);
-  row('Total COGS',totalCogs,'',true);
-
-  var gp=d.map(function(m){return m.grossProfit});
-  var gm=d.map(function(m){return m.grossMargin});
-  row('Gross Profit',gp,'color:var(--gn);font-weight:700',true);
-  h+='<tr><td style="font-size:10px;color:var(--txM)">Gross Margin %</td>';
-  gm.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:10px;color:var(--txM)">'+v.toFixed(1)+'%</td>'});
-  var totalGM=revenue.reduce(function(a,b){return a+b},0)>0?((gp.reduce(function(a,b){return a+b},0)/revenue.reduce(function(a,b){return a+b},0))*100).toFixed(1):'0';
-  h+='<td class="mono" style="text-align:right;font-size:10px;color:var(--txM)">'+totalGM+'%</td></tr>';
-
-  h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">OPERATING EXPENSES</td></tr>';
-  // Labor by department
-  var depts=['S&M','G&A','Training'];
-  depts.forEach(function(dept){
-    var labor=d.map(function(m){return m.lab[dept]||0});
-    if(labor.some(function(v){return v>0})) row('  '+dept+' Labor',labor);
-  });
-  // Vendor expenses by service category (from vdCats)
-  var allCats={};
-  d.forEach(function(m){
-    var cats=m.vdCats||{};
-    Object.keys(cats).forEach(function(cat){allCats[cat]=true});
-  });
-  // Filter out COGS categories (they're in COGS section) - show only OpEx categories
-  Object.keys(allCats).sort().forEach(function(cat){
-    var vals=d.map(function(m){return(m.vdCats||{})[cat]||0});
-    if(vals.some(function(v){return v>0})) row('  '+cat,vals);
-  });
-  var opex=d.map(function(m){return m.opex});
-  row('Total OpEx',opex,'',true);
-
-  var ebit=d.map(function(m){return m.grossProfit-m.opex});
-  row('Operating Income (EBIT)',ebit,'color:'+(ebit.reduce(function(a,b){return a+b},0)>=0?'var(--gn)':'var(--rd)'),true);
-
-  h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">FINANCE</td></tr>';
-  var finLabor=d.map(function(m){return m.lab['Finance']||0});
-  var finVendor=d.map(function(m){return m.vd['Finance']||0});
-  if(finLabor.some(function(v){return v>0})) row('  Finance Labor',finLabor);
-  if(finVendor.some(function(v){return v>0})) row('  Finance Expenses',finVendor);
-  // Loan interest is already in Finance dept vendors
-  var finance=d.map(function(m){return(m.lab['Finance']||0)+(m.vd['Finance']||0)});
-
-  var netIncome=d.map(function(m,i){return ebit[i]-(finance[i]||0)});
-  row('Net Income',netIncome,'font-size:14px;color:'+(netIncome.reduce(function(a,b){return a+b},0)>=0?'var(--gn)':'var(--rd)'),true);
-
-  h+='</tbody></table></div>';
-
-  // P&L Chart
-  h+='<div class="cc" style="margin-top:16px"><div class="cc-t">P&L Monthly</div><div style="height:260px"><canvas id="chPnL"></canvas></div></div>';
-
-  el.innerHTML=h;
-  mk('chPnL',{type:'bar',data:{labels:months,datasets:[
-    {label:'Revenue',data:revenue,backgroundColor:'#10b981aa',borderRadius:4},
-    {label:'COGS',data:totalCogs.map(function(v){return-v}),backgroundColor:'#f59e0b88',borderRadius:4},
-    {label:'OpEx',data:opex.map(function(v){return-v}),backgroundColor:'#ef444488',borderRadius:4},
-    {label:'Net Income',data:netIncome,type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4}
-  ]}});
-  
-  // Upload handler
-  document.getElementById('plUpload').addEventListener('change',function(){
-    if(!this.files[0])return;
-    var fd=new FormData();fd.append('file',this.files[0]);
-    authFetch('/api/upload-historical',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(res){
-      if(res.ok){toast('Imported '+res.type.toUpperCase()+': '+res.months+' months');renderPnL()}
-      else toast('Error: '+(res.error||'Unknown'));
-    }).catch(function(e){toast('Upload failed')});
-  });
-  
-  // Load 2025 data
-  authFetch('/api/historical/2025').then(function(r){return r.json()}).then(function(hist){
-    var data=hist.data||{};
-    if(!data.pl_revenue)return;
-    var sec=document.getElementById('pl2025Section');if(!sec)return;
-    var months25=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    var ph='<div class="cc" style="margin-bottom:16px"><div class="cc-t" style="display:flex;justify-content:space-between;align-items:center">FY2025 P&L (Imported) <span style="font-size:10px;color:var(--txM)">Months 1-10</span></div>';
-    ph+='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px;font-size:11px"><thead><tr><th style="text-align:left;min-width:180px"></th>';
-    months25.forEach(function(m){ph+='<th style="min-width:70px;text-align:right">'+m+'</th>'});
-    ph+='<th style="min-width:85px;text-align:right;font-weight:800">Total</th></tr></thead><tbody>';
+  if(plYear===2026){
+    // 2026 — computed from DB (read-only)
+    var d=D.summary;
+    h+='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px"><thead><tr style="font-size:11px"><th style="text-align:left;min-width:180px"></th>';
+    months.forEach(function(m){h+='<th style="min-width:75px">'+m+'</th>'});
+    h+='<th style="min-width:90px;font-weight:800">Total</th></tr></thead><tbody>';
     
-    function hRow(label,key,style){
-      var vals=data[key]||new Array(12).fill(0);
+    function row(label,vals,style,isTotal){
+      var s=style||'';var cls=isTotal?'font-weight:800;border-top:2px solid var(--bd);':'';
       var total=vals.reduce(function(a,b){return a+b},0);
-      var cls=style||'';
-      ph+='<tr style="'+cls+'"><td style="font-weight:600;padding-left:'+(label.startsWith('  ')?'24px':'0')+'">'+label.trim()+'</td>';
-      vals.forEach(function(v){ph+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
-      ph+='<td class="mono" style="text-align:right;font-weight:800;'+(total<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
+      h+='<tr style="'+cls+s+'"><td style="font-weight:'+(isTotal?'800':'600')+';padding-left:'+(label.startsWith('  ')?'24px':'0')+'">'+label.trim()+'</td>';
+      vals.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:12px;'+(finConv(v)<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
+      h+='<td class="mono" style="text-align:right;font-weight:800;font-size:12px;'+(finConv(total)<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
     }
     
-    hRow('Revenue','pl_revenue','color:var(--gn)');
-    ph+='<tr><td colspan="14" style="font-size:9px;color:var(--txM);padding:4px 0 2px;font-weight:700">LABOR</td></tr>';
-    hRow('  Management','pl_mgmt_labor','');
-    hRow('  R&D','pl_rd_labor','');
-    hRow('  S&M','pl_sm_labor','');
-    hRow('Total Labor','pl_total_labor','font-weight:800;border-top:1px solid var(--bd)');
-    ph+='<tr><td colspan="14" style="font-size:9px;color:var(--txM);padding:4px 0 2px;font-weight:700">VENDOR EXPENSES</td></tr>';
-    hRow('  G&M','pl_gm_expenses','');
-    hRow('  Traveling','pl_travel','');
-    hRow('  S&M Expenses','pl_sm_expenses','');
-    hRow('  R&D Expenses','pl_rd_expenses','');
-    hRow('Total Vendors','pl_total_vendors','font-weight:800;border-top:1px solid var(--bd)');
-    hRow('Finance','pl_finance','');
-    hRow('Net Income','pl_net_income','font-weight:800;border-top:2px solid var(--bd);color:var(--am)');
-    ph+='</tbody></table></div></div>';
-    sec.innerHTML=ph;
-  }).catch(function(){});
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--gn);padding:6px 0 2px;font-weight:700">REVENUE</td></tr>';
+    var allRevCats={};
+    d.forEach(function(m){var cats=m.revCats||{};Object.keys(cats).forEach(function(cat){allRevCats[cat]=true})});
+    Object.keys(allRevCats).sort().forEach(function(cat){
+      var vals=d.map(function(m){return(m.revCats||{})[cat]||0});
+      if(vals.some(function(v){return v>0})) row('  '+cat,vals,'color:var(--gn)');
+    });
+    var revenue=d.map(function(m){return m.revenue});
+    row('Total Revenue',revenue,'color:var(--gn)',true);
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:6px 0 2px;font-weight:700">COST OF GOODS SOLD</td></tr>';
+    var cogsRD=d.map(function(m){return m.lab['R&D']||0});
+    var cogsVd=d.map(function(m){return m.vd['R&D']||0});
+    var totalCogs=d.map(function(m){return m.cogs});
+    row('  R&D Labor',cogsRD);
+    row('  R&D Vendors',cogsVd);
+    row('Total COGS',totalCogs,'',true);
+    
+    var gp=d.map(function(m){return m.grossProfit});
+    var gm=d.map(function(m){return m.grossMargin});
+    row('Gross Profit',gp,'color:var(--gn);font-weight:700',true);
+    h+='<tr><td style="font-size:10px;color:var(--txM)">Gross Margin %</td>';
+    gm.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:10px;color:var(--txM)">'+v.toFixed(1)+'%</td>'});
+    var totalGM=revenue.reduce(function(a,b){return a+b},0)>0?((gp.reduce(function(a,b){return a+b},0)/revenue.reduce(function(a,b){return a+b},0))*100).toFixed(1):'0';
+    h+='<td class="mono" style="text-align:right;font-size:10px;color:var(--txM)">'+totalGM+'%</td></tr>';
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">OPERATING EXPENSES</td></tr>';
+    var depts=['S&M','G&A','Training'];
+    depts.forEach(function(dept){
+      var labor=d.map(function(m){return m.lab[dept]||0});
+      if(labor.some(function(v){return v>0})) row('  '+dept+' Labor',labor);
+    });
+    var allCats={};
+    d.forEach(function(m){var cats=m.vdCats||{};Object.keys(cats).forEach(function(cat){allCats[cat]=true})});
+    Object.keys(allCats).sort().forEach(function(cat){
+      var vals=d.map(function(m){return(m.vdCats||{})[cat]||0});
+      if(vals.some(function(v){return v>0})) row('  '+cat,vals);
+    });
+    var opex=d.map(function(m){return m.opex});
+    row('Total OpEx',opex,'',true);
+    
+    var ebit=d.map(function(m){return m.grossProfit-m.opex});
+    row('Operating Income (EBIT)',ebit,'color:'+(ebit.reduce(function(a,b){return a+b},0)>=0?'var(--gn)':'var(--rd)'),true);
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">FINANCE</td></tr>';
+    var finLabor=d.map(function(m){return m.lab['Finance']||0});
+    var finVendor=d.map(function(m){return m.vd['Finance']||0});
+    if(finLabor.some(function(v){return v>0})) row('  Finance Labor',finLabor);
+    if(finVendor.some(function(v){return v>0})) row('  Finance Expenses',finVendor);
+    var finance=d.map(function(m){return(m.lab['Finance']||0)+(m.vd['Finance']||0)});
+    var netIncome=d.map(function(m,i){return ebit[i]-(finance[i]||0)});
+    row('Net Income',netIncome,'font-size:14px;color:'+(netIncome.reduce(function(a,b){return a+b},0)>=0?'var(--gn)':'var(--rd)'),true);
+    h+='</tbody></table></div>';
+    
+    h+='<div class="cc" style="margin-top:16px"><div class="cc-t">P&L Monthly</div><div style="height:260px"><canvas id="chPnL"></canvas></div></div>';
+    el.innerHTML=h;
+    
+    mk('chPnL',{type:'bar',data:{labels:months,datasets:[
+      {label:'Revenue',data:revenue,backgroundColor:'#10b981aa',borderRadius:4},
+      {label:'COGS',data:totalCogs.map(function(v){return-v}),backgroundColor:'#f59e0b88',borderRadius:4},
+      {label:'OpEx',data:opex.map(function(v){return-v}),backgroundColor:'#ef444488',borderRadius:4},
+      {label:'Net Income',data:netIncome,type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4}
+    ]}});
+  } else {
+    // Other years — editable manual table
+    h+='<div id="plManualTable"><div style="padding:20px;text-align:center;color:var(--txM)">Loading...</div></div>';
+    el.innerHTML=h;
+    loadManualPL();
+  }
+  
+  document.getElementById('plYearSel').addEventListener('change',function(){plYear=parseInt(this.value);renderPnL()});
+  var addBtn=document.getElementById('plAddCat');
+  if(addBtn) addBtn.addEventListener('click',function(){
+    var name=prompt('New category name:');if(!name)return;
+    var section=prompt('Section (revenue/cogs/opex/finance):','opex');if(!section)return;
+    authFetch('/api/pl-categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,section:section})})
+      .then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Category added');renderPnL()}});
+  });
 }
 
+function loadManualPL(){
+  authFetch('/api/pl-data/'+plYear).then(function(r){return r.json()}).then(function(data){
+    var cats=data.categories;
+    var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var sections={revenue:[],cogs:[],opex:[],finance:[]};
+    cats.forEach(function(c){
+      if(sections[c.section]) sections[c.section].push(c);
+      else sections.opex.push(c);
+    });
+    
+    var h='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px;font-size:11px"><thead><tr><th style="text-align:left;min-width:180px"></th>';
+    months.forEach(function(m){h+='<th style="min-width:75px;text-align:right">'+m+'</th>'});
+    h+='<th style="min-width:90px;text-align:right;font-weight:800">Total</th></tr></thead><tbody>';
+    
+    function editRow(cat){
+      var total=0;
+      for(var i=1;i<=12;i++) total+=(cat.months[String(i)]||0);
+      h+='<tr><td style="font-weight:600;padding-left:16px">'+cat.name+'</td>';
+      for(var i=1;i<=12;i++){
+        var v=cat.months[String(i)]||0;
+        h+='<td class="mono" style="text-align:right"><input class="pl-cell" data-cat="'+cat.name+'" data-month="'+i+'" value="'+v+'" style="width:70px;text-align:right;background:transparent;border:1px solid transparent;color:var(--tx);font-size:11px;font-family:inherit;padding:2px 4px;border-radius:3px" onfocus="this.style.borderColor=\'var(--ac)\'" onblur="this.style.borderColor=\'transparent\'"></td>';
+      }
+      h+='<td class="mono" style="text-align:right;font-weight:800;'+(total<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
+    }
+    
+    function sectionTotal(label,catList,style){
+      h+='<tr style="'+(style||'')+';font-weight:800;border-top:2px solid var(--bd)"><td>'+label+'</td>';
+      for(var i=1;i<=12;i++){
+        var v=0;catList.forEach(function(c){v+=(c.months[String(i)]||0)});
+        h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>';
+      }
+      var t=0;catList.forEach(function(c){for(var i=1;i<=12;i++) t+=(c.months[String(i)]||0)});
+      h+='<td class="mono" style="text-align:right;font-weight:800;'+(t<0?'color:var(--rd)':'')+'">'+finFmt(t)+'</td></tr>';
+    }
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--gn);padding:6px 0 2px;font-weight:700">REVENUE</td></tr>';
+    sections.revenue.forEach(editRow);
+    sectionTotal('Total Revenue',sections.revenue,'color:var(--gn)');
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:6px 0 2px;font-weight:700">COST OF GOODS SOLD</td></tr>';
+    sections.cogs.forEach(editRow);
+    sectionTotal('Total COGS',sections.cogs);
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">OPERATING EXPENSES</td></tr>';
+    sections.opex.forEach(editRow);
+    sectionTotal('Total OpEx',sections.opex);
+    
+    h+='<tr><td colspan="14" style="font-size:10px;color:var(--txM);padding:10px 0 2px;font-weight:700">FINANCE</td></tr>';
+    sections.finance.forEach(editRow);
+    sectionTotal('Total Finance',sections.finance);
+    
+    // Net Income
+    h+='<tr style="font-weight:900;border-top:3px double var(--bd);font-size:13px"><td>Net Income</td>';
+    for(var i=1;i<=12;i++){
+      var v=0;cats.forEach(function(c){v+=(c.months[String(i)]||0)});
+      h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'var(--gn)')+'">'+finFmt(v)+'</td>';
+    }
+    var nt=0;cats.forEach(function(c){for(var i=1;i<=12;i++) nt+=(c.months[String(i)]||0)});
+    h+='<td class="mono" style="text-align:right;font-weight:900;'+(nt<0?'color:var(--rd)':'var(--gn)')+'">'+finFmt(nt)+'</td></tr>';
+    
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Click any cell to edit. Values auto-save on blur. Amounts in USD.</div>';
+    
+    document.getElementById('plManualTable').innerHTML=h;
+    
+    // Auto-save on blur
+    document.querySelectorAll('.pl-cell').forEach(function(inp){
+      inp.addEventListener('blur',function(){
+        var cat=this.dataset.cat;
+        var month=parseInt(this.dataset.month);
+        var amount=parseFloat(this.value)||0;
+        authFetch('/api/pl-data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          year:plYear,category:cat,month:month,amount:amount
+        })}).then(function(r){return r.json()}).then(function(res){if(res.ok)loadManualPL()});
+      });
+      inp.addEventListener('keydown',function(e){if(e.key==='Enter'){this.blur()}});
+    });
+  });
+}
+
+var bsYear=2026;
 function renderBalanceSheet(){
   var el=document.getElementById('st-bs');if(!el)return;
-  var d=D.summary;var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var h='<h2 style="margin-bottom:16px">Balance Sheet — FY2026</h2>';
-  h+='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px"><thead><tr style="font-size:11px"><th style="text-align:left;min-width:180px"></th>';
-  months.forEach(function(m){h+='<th style="min-width:75px">'+m+'</th>'});
-  h+='</tr></thead><tbody>';
-
-  function row(label,vals,style,isTotal){
-    var s=style||'';var cls=isTotal?'font-weight:800;border-top:2px solid var(--bd);':'';
-    h+='<tr style="'+cls+s+'"><td style="font-weight:'+(isTotal?'800':'600')+';padding-left:'+(label.startsWith('  ')?'24px':'0')+'">'+label.trim()+'</td>';
-    vals.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:12px;'+(finConv(v)<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
+  var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+  h+='<h2 style="margin:0">Balance Sheet</h2>';
+  h+='<div style="display:flex;gap:8px;align-items:center">';
+  h+='<select id="bsYearSel" style="padding:6px 12px;font-size:13px;font-weight:700;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px">';
+  for(var y=2025;y<=2027;y++) h+='<option value="'+y+'"'+(y===bsYear?' selected':'')+'>FY '+y+'</option>';
+  h+='</select>';
+  if(bsYear!==2026) h+='<button class="btn-p" id="bsAddCat" style="padding:6px 14px;font-size:11px">+ Add Category</button>';
+  h+='</div></div>';
+  
+  if(bsYear===2026){
+    // 2026 — computed from DB (read-only)
+    var d=D.summary;
+    h+='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px"><thead><tr style="font-size:11px"><th style="text-align:left;min-width:180px"></th>';
+    months.forEach(function(m){h+='<th style="min-width:75px">'+m+'</th>'});
+    h+='</tr></thead><tbody>';
+    
+    function bsRow(label,vals,style,isTotal){
+      var s=style||'';var cls=isTotal?'font-weight:800;border-top:2px solid var(--bd);':'';
+      h+='<tr style="'+cls+s+'"><td style="font-weight:'+(isTotal?'800':'600')+';padding-left:'+(label.startsWith('  ')?'24px':'0')+'">'+label.trim()+'</td>';
+      vals.forEach(function(v){h+='<td class="mono" style="text-align:right;font-size:12px;'+(finConv(v)<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
+      h+='</tr>';
+    }
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:6px 0 2px;font-weight:700">ASSETS</td></tr>';
+    var cash=d.map(function(m){return m.cumCash||0});
+    var ar=d.map(function(m){return m.ar||0});
+    var totalAssets=d.map(function(m,i){return cash[i]+ar[i]});
+    bsRow('  Cash & Banks',cash);
+    bsRow('  Accounts Receivable',ar);
+    bsRow('Total Assets',totalAssets,'color:var(--ac)',true);
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--rd);padding:10px 0 2px;font-weight:700">LIABILITIES</td></tr>';
+    var ap=d.map(function(m){return m.ap||0});
+    var netPay=d.map(function(m){return m.cfGross||0});
+    var ssPay=d.map(function(m){return(m.cfSS||0)+(m.cfDisability||0)});
+    var penPay=d.map(function(m){return(m.cfPension||0)+(m.cfStudyFund||0)});
+    var taxPay=d.map(function(m){return m.cfTax||0});
+    var totalPayroll=d.map(function(m,i){return netPay[i]+ssPay[i]+penPay[i]+taxPay[i]});
+    var loanBal=d.map(function(m){return m.loanBalance||0});
+    bsRow('  Accounts Payable',ap);
+    bsRow('  Net Salary Payable',netPay);
+    bsRow('  Social Security',ssPay);
+    bsRow('  Pension & Study Fund',penPay);
+    bsRow('  Tax Payable',taxPay);
+    bsRow('  Loans Outstanding',loanBal);
+    var totalLiab=d.map(function(m,i){return ap[i]+totalPayroll[i]+loanBal[i]});
+    bsRow('Total Liabilities',totalLiab,'color:var(--rd)',true);
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:10px 0 2px;font-weight:700">EQUITY</td></tr>';
+    var cumInvestment=0;
+    var investedCapital=d.map(function(m){cumInvestment+=(m.investmentIn||0);return cumInvestment});
+    var totalEquity=d.map(function(m,i){return totalAssets[i]-totalLiab[i]});
+    var retained=d.map(function(m,i){return totalEquity[i]-investedCapital[i]});
+    if(investedCapital.some(function(v){return v>0})) bsRow('  Invested Capital',investedCapital,'color:var(--ac)');
+    bsRow('  Retained Earnings',retained);
+    bsRow('Total Equity',totalEquity,'color:var(--ac)',true);
+    
+    h+='<tr style="border-top:3px double var(--bd)"><td style="font-weight:900;font-size:13px">Liabilities + Equity</td>';
+    d.forEach(function(m,i){h+='<td class="mono" style="text-align:right;font-weight:800;font-size:12px">'+finFmt(totalLiab[i]+totalEquity[i])+'</td>'});
     h+='</tr>';
+    h+='</tbody></table></div>';
+    el.innerHTML=h;
+  } else {
+    // Other years — editable manual table
+    h+='<div id="bsManualTable"><div style="padding:20px;text-align:center;color:var(--txM)">Loading...</div></div>';
+    el.innerHTML=h;
+    loadManualBS();
   }
-
-  h+='<tr><td colspan="13" style="font-size:10px;color:var(--gn);padding:6px 0 2px;font-weight:700">ASSETS</td></tr>';
-  var cash=d.map(function(m){return m.cumCash});
-  row('  Cash & Equivalents',cash);
-  var ar=d.map(function(m){return m.ar||0});
-  row('  Accounts Receivable',ar);
-  var totalAssets=d.map(function(m,i){return cash[i]+ar[i]});
-  row('Total Assets',totalAssets,'color:var(--gn)',true);
-
-  h+='<tr><td colspan="13" style="font-size:10px;color:var(--rd);padding:10px 0 2px;font-weight:700">LIABILITIES</td></tr>';
-  var ap=d.map(function(m){return m.ap||0});
-  row('  Accounts Payable',ap);
   
-  // Payroll Liabilities breakdown — accrued but not yet paid
-  // At end of month i: we accrued this month but pay next month
-  var netPayable=d.map(function(m,i){
-    // Net salary accrued this month, paid next month
-    return i<11?m.accrualGross||0:0;
+  document.getElementById('bsYearSel').addEventListener('change',function(){bsYear=parseInt(this.value);renderBalanceSheet()});
+  var addBtn=document.getElementById('bsAddCat');
+  if(addBtn) addBtn.addEventListener('click',function(){
+    var name=prompt('New category name:');if(!name)return;
+    var section=prompt('Section (assets/liabilities/equity):','assets');if(!section)return;
+    authFetch('/api/bs-categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,section:section})})
+      .then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Category added');renderBalanceSheet()}});
   });
-  var ssPayable=d.map(function(m,i){
-    return i<11?(m.accrualSS||0)+(m.accrualDisability||0):0;
-  });
-  var pensionPayable=d.map(function(m,i){
-    return i<11?(m.accrualPension||0)+(m.accrualSF||0):0;
-  });
-  var taxPayable=d.map(function(m,i){
-    return i<11?m.accrualTax||0:0;
-  });
-  
-  h+='<tr><td colspan="13" style="font-size:9px;color:var(--txM);padding:4px 0 0;font-weight:600">  Payroll Liabilities</td></tr>';
-  row('    Net Salary Payable',netPayable);
-  row('    Social Security & Disability',ssPayable);
-  row('    Pension & Study Fund',pensionPayable);
-  row('    Tax Payable',taxPayable);
-  var totalPayroll=d.map(function(m,i){return netPayable[i]+ssPayable[i]+pensionPayable[i]+taxPayable[i]});
-  row('  Total Payroll Liabilities',totalPayroll,'font-weight:700');
-  
-  var loanBal=d.map(function(m){return m.loanBalance||0});
-  row('  Loans Outstanding',loanBal);
-  var totalLiab=d.map(function(m,i){return ap[i]+totalPayroll[i]+loanBal[i]});
-  row('Total Liabilities',totalLiab,'color:var(--rd)',true);
+}
 
-  h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:10px 0 2px;font-weight:700">EQUITY</td></tr>';
-  var cumInvestment=0;
-  var investedCapital=d.map(function(m){cumInvestment+=(m.investmentIn||0);return cumInvestment});
-  var totalEquity=d.map(function(m,i){return totalAssets[i]-totalLiab[i]});
-  var retained=d.map(function(m,i){return totalEquity[i]-investedCapital[i]});
-  if(investedCapital.some(function(v){return v>0})) row('  Invested Capital',investedCapital,'color:var(--ac)');
-  row('  Retained Earnings',retained);
-  row('Total Equity',totalEquity,'color:var(--ac)',true);
-
-  h+='<tr style="border-top:3px double var(--bd)"><td style="font-weight:900;font-size:13px">Liabilities + Equity</td>';
-  d.forEach(function(m,i){h+='<td class="mono" style="text-align:right;font-weight:800;font-size:12px">'+finFmt(totalLiab[i]+totalEquity[i])+'</td>'});
-  h+='</tr>';
-
-  h+='</tbody></table></div>';
-  h+='<div style="margin-top:12px;font-size:10px;color:var(--txM)">Note: Simplified balance sheet based on available data. Add loans/assets in Detailed Info for complete picture.</div>';
-  el.innerHTML=h;
+function loadManualBS(){
+  authFetch('/api/bs-data/'+bsYear).then(function(r){return r.json()}).then(function(data){
+    var cats=data.categories;
+    var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var sections={assets:[],liabilities:[],equity:[]};
+    cats.forEach(function(c){if(sections[c.section]) sections[c.section].push(c);else sections.assets.push(c)});
+    
+    var h='<div style="overflow-x:auto"><table style="width:100%;min-width:1000px;font-size:11px"><thead><tr><th style="text-align:left;min-width:180px"></th>';
+    months.forEach(function(m){h+='<th style="min-width:75px;text-align:right">'+m+'</th>'});
+    h+='</tr></thead><tbody>';
+    
+    function editRow(cat){
+      h+='<tr><td style="font-weight:600;padding-left:16px">'+cat.name+'</td>';
+      for(var i=1;i<=12;i++){
+        var v=cat.months[String(i)]||0;
+        h+='<td class="mono" style="text-align:right"><input class="bs-cell" data-cat="'+cat.name+'" data-month="'+i+'" value="'+v+'" style="width:70px;text-align:right;background:transparent;border:1px solid transparent;color:var(--tx);font-size:11px;font-family:inherit;padding:2px 4px;border-radius:3px" onfocus="this.style.borderColor=\'var(--ac)\'" onblur="this.style.borderColor=\'transparent\'"></td>';
+      }
+      h+='</tr>';
+    }
+    
+    function sectionTotal(label,catList,style){
+      h+='<tr style="'+(style||'')+';font-weight:800;border-top:2px solid var(--bd)"><td>'+label+'</td>';
+      for(var i=1;i<=12;i++){
+        var v=0;catList.forEach(function(c){v+=(c.months[String(i)]||0)});
+        h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>';
+      }
+      h+='</tr>';
+    }
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:6px 0 2px;font-weight:700">ASSETS</td></tr>';
+    sections.assets.forEach(editRow);
+    sectionTotal('Total Assets',sections.assets,'color:var(--ac)');
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--rd);padding:10px 0 2px;font-weight:700">LIABILITIES</td></tr>';
+    sections.liabilities.forEach(editRow);
+    sectionTotal('Total Liabilities',sections.liabilities,'color:var(--rd)');
+    
+    h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:10px 0 2px;font-weight:700">EQUITY</td></tr>';
+    sections.equity.forEach(editRow);
+    sectionTotal('Total Equity',sections.equity,'color:var(--ac)');
+    
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Click any cell to edit. Values auto-save on blur. Amounts in USD.</div>';
+    
+    document.getElementById('bsManualTable').innerHTML=h;
+    
+    document.querySelectorAll('.bs-cell').forEach(function(inp){
+      inp.addEventListener('blur',function(){
+        var cat=this.dataset.cat;
+        var month=parseInt(this.dataset.month);
+        var amount=parseFloat(this.value)||0;
+        authFetch('/api/bs-data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          year:bsYear,category:cat,month:month,amount:amount
+        })}).then(function(r){return r.json()}).then(function(res){if(res.ok)loadManualBS()});
+      });
+      inp.addEventListener('keydown',function(e){if(e.key==='Enter'){this.blur()}});
+    });
+  });
 }
 
 function renderFinancialSummary(){
