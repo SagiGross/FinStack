@@ -229,6 +229,15 @@ def init_db():
             notes TEXT DEFAULT '',
             created_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS historical_monthly (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            amount REAL DEFAULT 0,
+            source TEXT DEFAULT 'upload',
+            UNIQUE(year, month, category)
+        );
         CREATE TABLE IF NOT EXISTS investments (
             id TEXT PRIMARY KEY,
             investor TEXT NOT NULL,
@@ -2463,6 +2472,174 @@ def get_investments(user=Depends(require_admin)):
              "equityPct":r["equity_pct"] or 0,"subType":r["sub_type"] or "",
              "termMonths":r["term_months"] or 0,"annualRate":r["annual_rate"] or 0,
              "notes":r["notes"] or ""} for r in rows]
+
+# ══════════════════════════════════════════
+# HISTORICAL DATA (2025 import)
+# ══════════════════════════════════════════
+from fastapi import File, UploadFile
+import io, csv
+
+@app.post("/api/upload-historical")
+async def upload_historical(file: UploadFile = File(...), user=Depends(require_admin)):
+    """Parse P&L or BS CSV and store monthly data."""
+    content = await file.read()
+    text = content.decode('utf-8-sig')
+    reader = list(csv.reader(io.StringIO(text)))
+    
+    def parse_num(s):
+        if not s: return 0
+        try: return float(s.replace(',','').replace('"',''))
+        except: return 0
+    
+    # Detect file type
+    is_pl = any('P&L' in str(row) for row in reader[:5])
+    is_bs = any('Bank' in str(row) for row in reader[:5]) or 'BS' in (file.filename or '')
+    
+    # USD columns: months 01-10 at positions 7,9,11,13,15,17,19,21,23,25
+    usd_cols = [7, 9, 11, 13, 15, 17, 19, 21, 23, 25]
+    year = 2025
+    results = {}
+    
+    if is_pl or 'P_L' in (file.filename or ''):
+        # P&L parsing — find key Total rows
+        key_rows_map = {}
+        current_section = None
+        for i, row in enumerate(reader):
+            if len(row) < 26: continue
+            col0 = (row[0] or '').strip()
+            col3 = (row[3] or '').strip()
+            
+            # Track sections
+            if 'Management' in col0 and 'Total' not in col0: current_section = 'mgmt'
+            elif col0.startswith('R&D') and 'Expenses' not in col0 and 'Total' not in col0: current_section = 'rd'
+            elif col0.startswith('S&M') and 'Expenses' not in col0 and 'Total' not in col0: current_section = 'sm'
+            elif 'G&M Expenses' in col0 and 'Total' not in col0: current_section = 'gm'
+            elif 'Traveling' in col0 and 'Total' not in col0: current_section = 'travel'
+            elif 'S&M Expenses' in col0 and 'Total' not in col0: current_section = 'sm_exp'
+            elif 'R&D Expenses' in col0 and 'Total' not in col0: current_section = 'rd_exp'
+            elif 'Financing' in col0 and 'Total' not in col0: current_section = 'finance'
+            
+            if col3 == 'Total':
+                vals = [parse_num(row[c]) if c < len(row) else 0 for c in usd_cols]
+                
+                # Map by position
+                if i+1 == 15 or (not key_rows_map.get('revenue') and i < 16 and all(v >= 0 for v in vals) and sum(abs(v) for v in vals) > 10000):
+                    key_rows_map['revenue'] = vals
+                elif current_section == 'mgmt' and 'mgmt_labor' not in key_rows_map:
+                    key_rows_map['mgmt_labor'] = vals
+                elif current_section == 'rd' and 'rd_labor' not in key_rows_map:
+                    key_rows_map['rd_labor'] = vals
+                elif current_section == 'sm' and 'sm_labor' not in key_rows_map:
+                    key_rows_map['sm_labor'] = vals
+                elif current_section == 'gm' and 'gm_expenses' not in key_rows_map:
+                    key_rows_map['gm_expenses'] = vals
+                elif current_section == 'travel' and 'travel' not in key_rows_map:
+                    key_rows_map['travel'] = vals
+                elif current_section == 'sm_exp' and 'sm_expenses' not in key_rows_map:
+                    key_rows_map['sm_expenses'] = vals
+                elif current_section == 'rd_exp' and 'rd_expenses' not in key_rows_map:
+                    key_rows_map['rd_expenses'] = vals
+                elif current_section == 'finance' and 'finance' not in key_rows_map:
+                    key_rows_map['finance'] = vals
+                
+                # Grand total is the last Total row
+                if col0 == 'Total':
+                    key_rows_map['grand_total'] = vals
+        
+        results = key_rows_map
+        
+        # Store in DB
+        categories = {
+            'pl_revenue': 'revenue',
+            'pl_mgmt_labor': 'mgmt_labor',
+            'pl_rd_labor': 'rd_labor', 
+            'pl_sm_labor': 'sm_labor',
+            'pl_gm_expenses': 'gm_expenses',
+            'pl_travel': 'travel',
+            'pl_sm_expenses': 'sm_expenses',
+            'pl_rd_expenses': 'rd_expenses',
+            'pl_finance': 'finance',
+            'pl_grand_total': 'grand_total',
+        }
+        
+        with get_db() as db:
+            count = 0
+            for db_cat, key in categories.items():
+                vals = key_rows_map.get(key, [0]*10)
+                for mi, val in enumerate(vals):
+                    db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)",
+                               (year, mi+1, db_cat, val, 'upload'))
+                    count += 1
+            
+            # Also compute derived categories
+            for mi in range(10):
+                rev = key_rows_map.get('revenue', [0]*10)[mi]
+                mgmt = key_rows_map.get('mgmt_labor', [0]*10)[mi]
+                rd = key_rows_map.get('rd_labor', [0]*10)[mi]
+                sm = key_rows_map.get('sm_labor', [0]*10)[mi]
+                total_labor = mgmt + rd + sm
+                
+                gm = key_rows_map.get('gm_expenses', [0]*10)[mi]
+                travel = key_rows_map.get('travel', [0]*10)[mi]
+                sm_exp = key_rows_map.get('sm_expenses', [0]*10)[mi]
+                rd_exp = key_rows_map.get('rd_expenses', [0]*10)[mi]
+                total_vendors = gm + travel + sm_exp + rd_exp
+                
+                fin = key_rows_map.get('finance', [0]*10)[mi]
+                
+                cogs = rd + rd_exp  # R&D labor + R&D vendor expenses
+                opex = mgmt + sm + gm + travel + sm_exp
+                gross_profit = rev + cogs  # cogs is negative
+                net_income = rev + total_labor + total_vendors + fin
+                
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_total_labor', total_labor, 'derived'))
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_total_vendors', total_vendors, 'derived'))
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_cogs', cogs, 'derived'))
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_opex', opex, 'derived'))
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_gross_profit', gross_profit, 'derived'))
+                db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)", (year, mi+1, 'pl_net_income', net_income, 'derived'))
+        
+        return {"ok": True, "type": "pl", "months": 10, "categories": list(key_rows_map.keys()), "count": count}
+    
+    elif is_bs or 'BS' in (file.filename or ''):
+        # BS parsing — find group totals
+        bs_groups = {}
+        for i, row in enumerate(reader):
+            if len(row) < 26: continue
+            # Look for total rows (column 5 has a number, column 6 has ILS, column 7 has USD)
+            r0 = (row[0] or '').strip()
+            if r0.startswith('Total for Group') or (not r0 and not row[1] and not row[2] and not row[3] and not row[4] and row[5]):
+                # Get group name from nearby rows
+                vals = [parse_num(row[c]) if c < len(row) else 0 for c in usd_cols]
+                if sum(abs(v) for v in vals) > 0:
+                    # Store with line number as key
+                    bs_groups[f"bs_line_{i+1}"] = vals
+        
+        with get_db() as db:
+            count = 0
+            for cat, vals in bs_groups.items():
+                for mi, val in enumerate(vals):
+                    db.execute("INSERT OR REPLACE INTO historical_monthly (year,month,category,amount,source) VALUES (?,?,?,?,?)",
+                               (year, mi+1, cat, val, 'upload'))
+                    count += 1
+        
+        return {"ok": True, "type": "bs", "months": 10, "groups": len(bs_groups), "count": count}
+    
+    return {"ok": False, "error": "Could not detect file type"}
+
+@app.get("/api/historical/{year}")
+def get_historical(year: int, user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT month, category, amount FROM historical_monthly WHERE year=? ORDER BY month, category", (year,)).fetchall()
+    result = {}
+    for r in rows:
+        cat = r["category"]
+        if cat not in result:
+            result[cat] = [0.0] * 12
+        mi = r["month"] - 1
+        if 0 <= mi < 12:
+            result[cat][mi] = r["amount"]
+    return {"year": year, "data": result}
 
 # OPENING BALANCES (prior year payroll liabilities)
 # ══════════════════════════════════════════
