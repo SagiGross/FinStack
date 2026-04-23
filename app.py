@@ -32,7 +32,39 @@ def verify_pw(password: str, stored: str) -> bool:
 app = FastAPI(title="FinStack CFO API", version="6.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-ECF = 1.35; FY = 2026
+ECF = 1.35; FY = 2026  # ECF kept as fallback
+
+# Israeli Social Security brackets (2026) - EMPLOYER ONLY
+SS_LOW_THRESHOLD = 7703    # ILS
+SS_HIGH_THRESHOLD = 51910  # ILS
+SS_LOW_RATE = 0.0451       # employer: 4.51% on low bracket (leumi only, no briut)
+SS_HIGH_RATE = 0.076       # employer: 7.6% on high bracket
+
+def calc_social_security(gross_ils):
+    """Calculate employer social security (bituach leumi + briut) in ILS."""
+    if gross_ils <= 0: return 0
+    low_part = min(gross_ils, SS_LOW_THRESHOLD)
+    high_part = max(0, min(gross_ils, SS_HIGH_THRESHOLD) - SS_LOW_THRESHOLD)
+    return low_part * SS_LOW_RATE + high_part * SS_HIGH_RATE
+
+def calc_employer_cost(gross, bonus=0, position_pct=100, pension_pct=8.33, disability_pct=2.5, study_fund_pct=7.5, study_fund_salary=0, currency='ILS'):
+    """Calculate total monthly employer cost in original currency."""
+    base = gross * (position_pct / 100.0)
+    # Social security (only for ILS employees)
+    if currency == 'ILS':
+        ss = calc_social_security(base)
+    else:
+        ss = base * 0.15  # rough estimate for non-ILS
+    # Pension & disability on gross
+    pension = base * (pension_pct / 100.0)
+    disability = base * (disability_pct / 100.0)
+    # Study fund on insured salary (or gross if not set)
+    sf_base = study_fund_salary if study_fund_salary > 0 else base
+    study_fund = sf_base * (study_fund_pct / 100.0)
+    # Total
+    total = base + ss + pension + disability + study_fund + bonus
+    return total, {"gross": base, "socialSecurity": round(ss, 2), "pension": round(pension, 2), 
+                   "disability": round(disability, 2), "studyFund": round(study_fund, 2), "bonus": bonus}
 ML = [f"{m:02d}-{FY}" for m in range(1, 13)]
 JWT_SECRET = os.environ.get("JWT_SECRET", "finstack-secret-key-change-in-production")
 STAGES = ["Initial Contact", "Email Sent", "Demo", "Negotiation", "Signed"]
@@ -69,7 +101,14 @@ def init_db():
             id TEXT PRIMARY KEY, name TEXT NOT NULL, dept TEXT NOT NULL,
             gross REAL NOT NULL, position_pct REAL DEFAULT 100,
             bonus REAL DEFAULT 0, currency TEXT DEFAULT 'ILS',
-            hire_date TEXT NOT NULL, term_date TEXT, is_ghost INTEGER DEFAULT 0
+            pension_pct REAL DEFAULT 8.33,
+            disability_pct REAL DEFAULT 2.5,
+            study_fund_pct REAL DEFAULT 7.5,
+            study_fund_salary REAL DEFAULT 0,
+            hire_date TEXT NOT NULL, term_date TEXT, is_ghost INTEGER DEFAULT 0,
+            pay_net_date TEXT DEFAULT '',
+            pay_tax_date TEXT DEFAULT '',
+            pay_pension_date TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS contracts (
             id TEXT PRIMARY KEY, client TEXT NOT NULL, country TEXT DEFAULT '',
@@ -84,6 +123,8 @@ def init_db():
             payment_splits TEXT DEFAULT '[]',
             payment_method TEXT DEFAULT '',
             is_new_client INTEGER DEFAULT 1,
+            invoice_date TEXT DEFAULT '',
+            subject_to_vat INTEGER DEFAULT 0,
             created_at TEXT, updated_at TEXT,
             FOREIGN KEY (salesperson_id) REFERENCES users(id)
         );
@@ -97,7 +138,12 @@ def init_db():
             vendor_account_num TEXT DEFAULT '',
             is_fixed INTEGER DEFAULT 1,
             frequency TEXT DEFAULT 'monthly',
-            payment_method TEXT DEFAULT ''
+            payment_method TEXT DEFAULT '',
+            payment_dates TEXT DEFAULT '{}',
+            expense_invoice_date TEXT DEFAULT '',
+            expense_payment_date TEXT DEFAULT '',
+            is_recurring INTEGER DEFAULT 1,
+            subject_to_vat INTEGER DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS invoices (
             id TEXT PRIMARY KEY,
@@ -128,6 +174,95 @@ def init_db():
             bank_group TEXT DEFAULT '',
             is_active INTEGER DEFAULT 1,
             sort_order INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS loans (
+            id TEXT PRIMARY KEY,
+            lender TEXT NOT NULL,
+            amount REAL NOT NULL,
+            term_months INTEGER NOT NULL,
+            annual_rate REAL DEFAULT 0,
+            start_date TEXT NOT NULL,
+            repayment_type TEXT DEFAULT 'principal_interest',
+            currency TEXT DEFAULT 'ILS',
+            notes TEXT DEFAULT '',
+            interest_start_month TEXT DEFAULT '',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS cap_table (
+            id TEXT PRIMARY KEY,
+            holder_name TEXT NOT NULL,
+            shares REAL NOT NULL DEFAULT 0,
+            is_esop INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS income_sources (
+            id TEXT PRIMARY KEY,
+            client TEXT NOT NULL,
+            category TEXT DEFAULT '',
+            dept TEXT DEFAULT 'Revenue',
+            currency TEXT DEFAULT 'ILS',
+            contact_name TEXT DEFAULT '',
+            contact_phone TEXT DEFAULT '',
+            contact_email TEXT DEFAULT '',
+            is_recurring INTEGER DEFAULT 0,
+            subject_to_vat INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS income_payments (
+            id TEXT PRIMARY KEY,
+            income_id TEXT NOT NULL,
+            amount REAL DEFAULT 0,
+            invoice_date TEXT DEFAULT '',
+            payment_date TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id TEXT NOT NULL,
+            pref_key TEXT NOT NULL,
+            pref_value TEXT NOT NULL,
+            PRIMARY KEY (user_id, pref_key)
+        );
+        CREATE TABLE IF NOT EXISTS action_items (
+            id TEXT PRIMARY KEY,
+            contract_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            description TEXT NOT NULL,
+            due_date TEXT NOT NULL,
+            completed INTEGER DEFAULT 0,
+            completed_at TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS salary_snapshots (
+            id TEXT PRIMARY KEY,
+            employee_id TEXT NOT NULL,
+            month TEXT NOT NULL,
+            gross REAL NOT NULL,
+            position_pct REAL DEFAULT 100,
+            bonus REAL DEFAULT 0,
+            currency TEXT DEFAULT 'ILS',
+            dept TEXT DEFAULT 'R&D',
+            pension_pct REAL DEFAULT 8.33,
+            disability_pct REAL DEFAULT 2.5,
+            study_fund_pct REAL DEFAULT 7.5,
+            study_fund_salary REAL DEFAULT 0,
+            net_pay_date TEXT DEFAULT '',
+            tax_pay_date TEXT DEFAULT '',
+            pension_pay_date TEXT DEFAULT '',
+            created_at TEXT,
+            UNIQUE(employee_id, month)
+        );
+        CREATE TABLE IF NOT EXISTS expense_payments (
+            id TEXT PRIMARY KEY,
+            expense_id TEXT NOT NULL,
+            month TEXT NOT NULL,
+            amount REAL DEFAULT 0,
+            invoice_date TEXT DEFAULT '',
+            payment_date TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT
         );
         CREATE TABLE IF NOT EXISTS alert_dismissals (
             id TEXT PRIMARY KEY,
@@ -178,6 +313,15 @@ def carry_forward(known):
         result[m] = last
     return result
 
+def get_vat_rate():
+    """Get VAT rate from settings. Default 18% for Israel 2026."""
+    try:
+        with get_db() as db:
+            r = db.execute("SELECT value FROM app_settings WHERE key='vat_rate'").fetchone()
+            if r: return float(r["value"]) / 100
+    except: pass
+    return 0.18
+
 def get_exchange_rate():
     """Get current USD/ILS rate. Try live API, fallback to stored."""
     # Try stored rate first
@@ -220,18 +364,23 @@ def get_rate_for_month(month_str):
     return get_exchange_rate()
 
 def lock_past_months():
-    """Lock rates for past months on startup."""
+    """Lock rates for past months on startup. Uses stored rate if available, otherwise current live rate."""
     now = datetime.now()
     current_month = f"{now.month:02d}-{now.year}"
-    rate = get_exchange_rate()
+    live_rate = get_exchange_rate()
     with get_db() as db:
         for m in ML:
             if m < current_month:
-                existing = db.execute("SELECT locked FROM monthly_rates WHERE month=?", (m,)).fetchone()
+                existing = db.execute("SELECT rate, locked FROM monthly_rates WHERE month=?", (m,)).fetchone()
                 if not existing:
-                    db.execute("INSERT INTO monthly_rates (month, rate, locked) VALUES (?,?,1)", (m, rate))
+                    # No rate stored yet — lock with current live rate as best estimate
+                    db.execute("INSERT INTO monthly_rates (month, rate, locked) VALUES (?,?,1)", (m, live_rate))
+                    print(f"  Rate locked: {m} = {live_rate:.2f} (live fallback)")
                 elif not existing["locked"]:
+                    # Rate was stored but not locked — lock it (keeps the stored rate)
                     db.execute("UPDATE monthly_rates SET locked=1 WHERE month=?", (m,))
+                    print(f"  Rate locked: {m} = {existing['rate']:.2f} (stored)")
+                # If already locked, don't touch it
 
 def get_eur_rate():
     """Get EUR/USD rate. Try cached, then live."""
@@ -273,8 +422,27 @@ def auto_migrate():
         ("expenses", "vendor_branch_num", "TEXT DEFAULT ''"),
         ("expenses", "vendor_account_num", "TEXT DEFAULT ''"),
         ("expenses", "is_fixed", "INTEGER DEFAULT 1"),
+        ("expenses", "payment_dates", "TEXT DEFAULT '{}'"),
+        ("expenses", "expense_invoice_date", "TEXT DEFAULT ''"),
+        ("expenses", "expense_payment_date", "TEXT DEFAULT ''"),
+        ("expenses", "is_recurring", "INTEGER DEFAULT 1"),
+        ("expenses", "subject_to_vat", "INTEGER DEFAULT 1"),
+        ("contracts", "subject_to_vat", "INTEGER DEFAULT 0"),
+        ("loans", "interest_start_month", "TEXT DEFAULT ''"),
+        ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
+        ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
+        ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
+        ("expense_payments", "invoice_date", "TEXT DEFAULT ''"),
+        ("employees", "pension_pct", "REAL DEFAULT 8.33"),
+        ("employees", "disability_pct", "REAL DEFAULT 2.5"),
+        ("employees", "study_fund_pct", "REAL DEFAULT 7.5"),
+        ("employees", "study_fund_salary", "REAL DEFAULT 0"),
+        ("employees", "pay_net_date", "TEXT DEFAULT ''"),
+        ("employees", "pay_tax_date", "TEXT DEFAULT ''"),
+        ("employees", "pay_pension_date", "TEXT DEFAULT ''"),
         ("expenses", "currency", "TEXT DEFAULT 'ILS'"),
         ("contracts", "is_new_client", "INTEGER DEFAULT 1"),
+        ("contracts", "invoice_date", "TEXT DEFAULT ''"),
         ("contracts", "payment_splits", "TEXT DEFAULT '[]'"),
         ("contracts", "payment_method", "TEXT DEFAULT ''"),
         ("contracts", "contact_name", "TEXT DEFAULT ''"),
@@ -293,6 +461,28 @@ def auto_migrate():
                 print(f"  Migration: added {table}.{column}")
             except Exception:
                 pass  # Column already exists
+        
+        # Recreate expense_payments without UNIQUE constraint (allows multiple invoices per month)
+        try:
+            has_unique = False
+            tbl_info = db.execute("SELECT sql FROM sqlite_master WHERE name='expense_payments'").fetchone()
+            if tbl_info and "UNIQUE" in (tbl_info["sql"] or ""):
+                has_unique = True
+            if has_unique:
+                db.execute("ALTER TABLE expense_payments RENAME TO expense_payments_old")
+                db.execute("""CREATE TABLE expense_payments (
+                    id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, month TEXT NOT NULL,
+                    amount REAL DEFAULT 0, invoice_date TEXT DEFAULT '', payment_date TEXT DEFAULT '',
+                    notes TEXT DEFAULT '', created_at TEXT)""")
+                db.execute("""INSERT INTO expense_payments (id, expense_id, month, amount, invoice_date, payment_date, notes, created_at)
+                             SELECT id, expense_id, month, amount, 
+                                    COALESCE(invoice_date,''), COALESCE(payment_date,''), 
+                                    COALESCE(notes,''), created_at 
+                             FROM expense_payments_old""")
+                db.execute("DROP TABLE expense_payments_old")
+                print("  Migration: recreated expense_payments (removed UNIQUE)")
+        except Exception as e:
+            print(f"  Migration expense_payments: {e}")
 
 def is_seeded():
     with get_db() as db: return db.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] > 0
@@ -301,6 +491,14 @@ def seed_db():
     with get_db() as db:
         # Exchange rate default
         db.execute("INSERT OR IGNORE INTO app_settings VALUES ('usd_ils_rate','3.12')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('vat_rate','18')")  # Israel VAT 2026
+        # Default payroll payment dates (day of month)
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_net_day','9')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_net_month_offset','1')")  # 1 = next month
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_tax_day','15')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_tax_month_offset','1')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_pension_day','15')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_pension_month_offset','1')")
         # Users
         admin_hash = hash_pw("admin123")
         sales_hash = hash_pw("sales123")
@@ -441,7 +639,13 @@ def load_contracts():
 def load_expenses():
     with get_db() as db:
         rows = db.execute("SELECT * FROM expenses").fetchall()
-        return [dict(r) | {"amounts": json.loads(dict(r)["amounts"])} for r in rows]
+        return [dict(r) | {"amounts": json.loads(dict(r)["amounts"]), 
+                           "payment_dates": json.loads(dict(r).get("payment_dates","{}") or "{}")} for r in rows]
+
+def load_income_sources():
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM income_sources").fetchall()
+        return [dict(r) for r in rows]
 
 def load_salespeople():
     with get_db() as db:
@@ -466,80 +670,480 @@ def shift_pm(pm, days):
 
 def compute(delay=0, ghosts=0, gs=15000, w=True):
     employees=load_employees(); contracts=load_contracts(); expenses=load_expenses()
+    vat_rate = get_vat_rate()  # 0.18 for Israel 2026
     for i in range(ghosts):
         employees.append({"id":f"g{i}","name":f"Ghost {i+1}","dept":"R&D","gross":gs,"hire_date":"2026-01-01","term_date":None})
+    # Build invoice lookup: expense_id -> month -> total invoice amount
+    inv_by_expense_month = {}
+    try:
+        with get_db() as db:
+            inv_rows = db.execute("SELECT expense_id, amount, currency, due_date FROM invoices WHERE due_date IS NOT NULL").fetchall()
+            for inv in inv_rows:
+                if not inv["due_date"]: continue
+                try:
+                    dd = date.fromisoformat(inv["due_date"])
+                    if dd.year == FY:
+                        inv_ml = f"{dd.month:02d}-{dd.year}"
+                        key = (inv["expense_id"], inv_ml)
+                        if key not in inv_by_expense_month:
+                            inv_by_expense_month[key] = {"amount": 0, "currency": inv["currency"] or "ILS"}
+                        inv_by_expense_month[key]["amount"] += inv["amount"]
+                except: pass
+    except: pass
+
+    # Load salary snapshots for all months
+    snap_by_emp_month = {}
+    try:
+        with get_db() as db:
+            snap_rows = db.execute("SELECT * FROM salary_snapshots").fetchall()
+            for sr in snap_rows:
+                snap_by_emp_month[(sr["employee_id"], sr["month"])] = dict(sr)
+    except: pass
+
+    # Load ALL expense payment records (invoices)
+    exp_payments = {}
+    exp_invoices_by_inv_month = {}  # P&L: amounts WITHOUT VAT
+    exp_invoices_by_pay_month = {}  # CF: amounts WITH VAT when applicable
+    try:
+        with get_db() as db:
+            ep_rows = db.execute("SELECT ep.*, e.dept, e.is_cogs, e.currency, e.subject_to_vat, e.service_desc FROM expense_payments ep LEFT JOIN expenses e ON ep.expense_id=e.id").fetchall()
+            print(f"  [compute] Loaded {len(ep_rows)} expense_payment records")
+            for ep_row in ep_rows:
+                ep = dict(ep_row)
+                amt = ep["amount"] or 0
+                if amt <= 0: continue
+                dept = ep["dept"] or "G&A"
+                is_cogs = ep["is_cogs"] or 0
+                cur = ep["currency"] or "ILS"
+                has_vat = bool(ep.get("subject_to_vat", 1))
+                sub_cat = (ep.get("service_desc") or "").strip() or "Other"
+                amt_with_vat = amt * (1 + vat_rate) if has_vat else amt
+                
+                # P&L: by invoice_date month (without VAT)
+                inv_ml = ep.get("month", "")
+                if ep.get("invoice_date"):
+                    try:
+                        inv_d = date.fromisoformat(ep["invoice_date"])
+                        inv_ml = f"{inv_d.month:02d}-{inv_d.year}"
+                    except: pass
+                if inv_ml:
+                    exp_invoices_by_inv_month.setdefault(inv_ml, []).append({"amt": amt, "dept": dept, "is_cogs": is_cogs, "cur": cur, "ml": inv_ml, "cat": sub_cat})
+                    print(f"  [compute] Invoice: {sub_cat} {amt} {cur} -> P&L {inv_ml}")
+                
+                # Cash Flow: by payment_date month (with VAT)
+                if ep.get("payment_date"):
+                    try:
+                        pay_d = date.fromisoformat(ep["payment_date"])
+                        pay_ml = f"{pay_d.month:02d}-{pay_d.year}"
+                        exp_invoices_by_pay_month.setdefault(pay_ml, []).append({"amt": amt_with_vat, "cur": cur, "ml": pay_ml})
+                    except: pass
+                elif inv_ml:
+                    exp_invoices_by_pay_month.setdefault(inv_ml, []).append({"amt": amt_with_vat, "cur": cur, "ml": inv_ml})
+    except Exception as ex:
+        print(f"  [compute] ERROR loading expense_payments: {ex}")
+    except: pass
+
     data=[]
+    payroll_components = []
     for mi,ml in enumerate(ML):
         p=ml.split("-"); md=date(int(p[1]),int(p[0]),1)
         lab={"R&D":0,"S&M":0,"G&A":0,"Training":0,"Finance":0}
+        month_ss=0; month_pension=0; month_sf=0; month_dis=0; month_gross=0
         for e in employees:
             h=date.fromisoformat(e["hire_date"]); t=date.fromisoformat(e["term_date"]) if e["term_date"] else None
             if md>=h and (not t or md<=t):
-                pct=e.get("position_pct",100)/100.0
-                bonus=e.get("bonus",0)
-                raw=(e["gross"]+bonus)*ECF*pct
-                lab[e["dept"]]+=to_usd(raw, e.get("currency","ILS"), ml)
+                # Use snapshot if available for this employee+month, else current data
+                snap = snap_by_emp_month.get((e["id"], ml))
+                if snap:
+                    eg = snap["gross"]
+                    eb = snap.get("bonus", 0)
+                    ep = snap.get("position_pct", 100)
+                    epen = snap.get("pension_pct", 8.33)
+                    edis = snap.get("disability_pct", 2.5)
+                    esf = snap.get("study_fund_pct", 7.5)
+                    esfs = snap.get("study_fund_salary", 0)
+                    ecur = snap.get("currency", "ILS")
+                    edept = snap.get("dept", e["dept"])
+                else:
+                    eg = e["gross"]
+                    eb = e.get("bonus", 0)
+                    ep = e.get("position_pct", 100)
+                    epen = e.get("pension_pct", 8.33)
+                    edis = e.get("disability_pct", 2.5)
+                    esf = e.get("study_fund_pct", 7.5)
+                    esfs = e.get("study_fund_salary", 0)
+                    ecur = e.get("currency", "ILS")
+                    edept = e["dept"]
+                
+                total_cost, breakdown = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur)
+                lab[edept] += to_usd(total_cost, ecur, ml)
+                month_gross += to_usd(breakdown["gross"] + breakdown["bonus"], ecur, ml)
+                month_ss += to_usd(breakdown["socialSecurity"], ecur, ml)
+                month_pension += to_usd(breakdown["pension"], ecur, ml)
+                month_sf += to_usd(breakdown["studyFund"], ecur, ml)
+                month_dis += to_usd(breakdown["disability"], ecur, ml)
+        payroll_components.append({"ss": round(month_ss,2), "pension": round(month_pension,2),
+                                   "studyFund": round(month_sf,2), "disability": round(month_dis,2),
+                                   "grossNet": round(month_gross,2)})
         vd={"R&D":0,"S&M":0,"G&A":0,"Training":0,"Finance":0}; vc=vo=0
-        for x in expenses:
-            a=to_usd(x["amounts"].get(ml,0), x.get("currency","ILS"), ml)
-            vd[x["dept"]]+=a
-            if x["is_cogs"] == 1: vc+=a
-            else: vo+=a
+        vd_cats = {}  # category -> amount (for P&L line items)
+        # P&L: vendor expenses based ONLY on saved invoices (expense_payments by invoice_date)
+        for inv_entry in exp_invoices_by_inv_month.get(ml, []):
+            a = to_usd(inv_entry["amt"], inv_entry["cur"], ml)
+            vd[inv_entry["dept"]] += a
+            cat = inv_entry.get("cat", "Other")
+            vd_cats[cat] = vd_cats.get(cat, 0) + a
+            if inv_entry["is_cogs"] == 1: vc += a
+            else: vo += a
+        
+        # Cash Flow: vendor expenses based on expense_payments
+        # For each expense+accrual_month, check where it's actually paid
+        vd_cash=0
         cogs=lab["R&D"]+vc; opex=(sum(lab.values())-lab["R&D"])+vo
-        data.append({"month":ml[:2],"lab":{k:round(v,2) for k,v in lab.items()},"vd":{k:round(v,2) for k,v in vd.items()},"cogs":round(cogs,2),"opex":round(opex,2),"totalExp":round(cogs+opex,2),"revenue":0.0,"cashIn":0.0})
-    for c in contracts:
-        v=to_usd(c["val"], c.get("currency","USD"))
-        if w: v=v*c["chance"] if c["chance"] is not None else 0
-        sd=date.fromisoformat(c["sd"])
-        if c["monthly"]:
-            si=max(0,c["sm"]-1 if sd.year==FY else 0); rem=12-si
-            if rem<=0: continue
-            for i in range(si,12): data[i]["revenue"]+=v/rem
-        else:
-            if sd.year==FY:
-                idx=c["sm"]-1
-                if 0<=idx<12: data[idx]["revenue"]+=v
-            elif sd.year<FY: data[0]["revenue"]+=v
-    for c in contracts:
-        cur=c.get("currency","USD")
-        # Payment splits take priority
-        splits = json.loads(c.get("payment_splits","[]")) if c.get("payment_splits") else []
-        if splits:
-            for sp in splits:
-                try:
-                    sd2=date.fromisoformat(sp["date"])
-                    if sd2.year==FY:
-                        amt=to_usd(sp["amount"], cur)
-                        if w and c["chance"] is not None: amt=amt*c["chance"]
-                        elif w and c["chance"] is None: amt=0
-                        data[sd2.month-1]["cashIn"]+=amt
-                except: pass
-            continue
-        if c["ap"] and c["ap"]>0:
-            idx=parse_pm(shift_pm(c["pm"],delay))
-            if idx is not None: data[idx]["cashIn"]+=to_usd(c["ap"],cur); continue
-        v=to_usd(c["val"], cur)
-        if w: v=v*c["chance"] if c["chance"] is not None else 0
-        sd=date.fromisoformat(c["sd"])
-        if c["monthly"]:
-            si=max(0,c["sm"]-1 if sd.year==FY else 0); rem=12-si
-            if rem<=0: continue
-            for i in range(si,12):
-                pd=date(FY,i+1,15)+timedelta(days=c["dso"]+delay)
-                if pd.year==FY: data[pd.month-1]["cashIn"]+=v/rem
-        else:
-            idx=parse_pm(shift_pm(c["pm"],delay))
-            if idx is not None: data[idx]["cashIn"]+=v
+        data.append({"month":ml[:2],"lab":{k:round(v,2) for k,v in lab.items()},"vd":{k:round(v,2) for k,v in vd.items()},"vdCats":{k:round(v,2) for k,v in vd_cats.items()},"cogs":round(cogs,2),"opex":round(opex,2),"totalExp":round(cogs+opex,2),"revenue":0.0,"cashIn":0.0,"vendorCashOut":0.0})
+    # Build vendor cash out per month based on expense_payments by payment_date
+    vendor_cash_by_month = [0.0] * 12
+    for pay_ml, entries in exp_invoices_by_pay_month.items():
+        try:
+            parts = pay_ml.split("-")
+            mi_pay = int(parts[0]) - 1
+            if 0 <= mi_pay < 12 and int(parts[1]) == FY:
+                for entry in entries:
+                    vendor_cash_by_month[mi_pay] += to_usd(entry["amt"], entry["cur"], pay_ml)
+        except: pass
+    for i in range(12):
+        data[i]["vendorCashOut"] = round(vendor_cash_by_month[i], 2)
+    
+    # ── Revenue from income_payments (not contracts) ──
+    inc_by_inv_month = {}  # P&L: by invoice_date month (without VAT)
+    inc_by_pay_month = {}  # CF: by payment_date month (with VAT)
+    rev_cats_by_month = {}  # category breakdown for P&L
+    try:
+        with get_db() as db:
+            ip_rows = db.execute("""SELECT ip.*, inc.currency, inc.subject_to_vat, inc.category 
+                                   FROM income_payments ip 
+                                   LEFT JOIN income_sources inc ON ip.income_id=inc.id""").fetchall()
+            for ip in ip_rows:
+                ip = dict(ip)
+                amt = ip.get("amount") or 0
+                if amt <= 0: continue
+                cur = ip.get("currency") or "ILS"
+                has_vat = bool(ip.get("subject_to_vat", 0))
+                cat = (ip.get("category") or "").strip() or "Revenue"
+                amt_with_vat = amt * (1 + vat_rate) if has_vat else amt
+                
+                # P&L: by invoice_date
+                inv_ml = ""
+                if ip.get("invoice_date"):
+                    try:
+                        inv_d = date.fromisoformat(ip["invoice_date"])
+                        inv_ml = f"{inv_d.month:02d}-{inv_d.year}"
+                    except: pass
+                if inv_ml:
+                    inc_by_inv_month.setdefault(inv_ml, []).append({"amt": amt, "cur": cur, "cat": cat})
+                
+                # CF: by payment_date (with VAT)
+                if ip.get("payment_date"):
+                    try:
+                        pay_d = date.fromisoformat(ip["payment_date"])
+                        pay_ml = f"{pay_d.month:02d}-{pay_d.year}"
+                        inc_by_pay_month.setdefault(pay_ml, []).append({"amt": amt_with_vat, "cur": cur})
+                    except: pass
+                elif inv_ml:
+                    inc_by_pay_month.setdefault(inv_ml, []).append({"amt": amt_with_vat, "cur": cur})
+    except Exception as ex:
+        print(f"  [compute] ERROR loading income_payments: {ex}")
+    
+    # Apply revenue to data
+    for mi in range(12):
+        ml = ML[mi]
+        rev_cats = {}
+        for entry in inc_by_inv_month.get(ml, []):
+            v = to_usd(entry["amt"], entry["cur"], ml)
+            data[mi]["revenue"] += v
+            rev_cats[entry["cat"]] = rev_cats.get(entry["cat"], 0) + v
+        data[mi]["revCats"] = {k: round(v, 2) for k, v in rev_cats.items()}
+    
+    # Apply cash in from income
+    for pay_ml, entries in inc_by_pay_month.items():
+        try:
+            parts = pay_ml.split("-")
+            mi_pay = int(parts[0]) - 1
+            if 0 <= mi_pay < 12 and int(parts[1]) == FY:
+                for entry in entries:
+                    data[mi_pay]["cashIn"] += to_usd(entry["amt"], entry["cur"], pay_ml)
+        except: pass
+    # ── Loans: interest → P&L Finance, payments → Cash Flow ──
+    loans = load_loans()
+    for ln in loans:
+        sch = calc_loan_schedule(ln["amount"], ln["term_months"], ln["annual_rate"], ln["start_date"], ln["repayment_type"], ln.get("interest_start_month",""))
+        cur = ln.get("currency", "ILS")
+        for s in sch:
+            try:
+                pd2 = date.fromisoformat(s["date"])
+                if pd2.year == FY and 1 <= pd2.month <= 12:
+                    mi4 = pd2.month - 1
+                    interest_usd = to_usd(s["interest"], cur, ML[mi4])
+                    payment_usd = to_usd(s["payment"], cur, ML[mi4])
+                    # Interest → P&L as Finance expense (vendor category, not labor)
+                    data[mi4]["vd"]["Finance"] = data[mi4]["vd"].get("Finance", 0) + interest_usd
+                    data[mi4].setdefault("vdCats", {})
+                    data[mi4]["vdCats"]["Interest"] = data[mi4]["vdCats"].get("Interest", 0) + interest_usd
+                    # Loan repayment tracking for cash flow
+                    data[mi4].setdefault("loanInterest", 0)
+                    data[mi4]["loanInterest"] += interest_usd
+                    data[mi4].setdefault("loanPrincipal", 0)
+                    data[mi4]["loanPrincipal"] += to_usd(s["principal"], cur, ML[mi4])
+                    data[mi4].setdefault("loanPayment", 0)
+                    data[mi4]["loanPayment"] += payment_usd
+            except: pass
+    # Recalculate COGS/OpEx after adding loan interest
+    for mi5 in range(12):
+        d5 = data[mi5]
+        vc5 = sum(v2 for k2, v2 in d5["vd"].items() if k2 == "R&D")  # simplified
+        d5["cogs"] = round(d5["lab"]["R&D"] + vc5, 2) if "R&D" in d5["lab"] else d5["cogs"]
+        d5["opex"] = round(sum(d5["lab"].values()) - d5["lab"].get("R&D", 0) + sum(d5["vd"].values()) - vc5, 2)
+        d5["totalExp"] = round(d5["cogs"] + d5["opex"], 2)
+
     cum=0
-    for d in data:
+    # Load tax payments from app_settings
+    tax_payments = {}
+    loan_opening_bal = 0
+    try:
+        with get_db() as db:
+            tax_rows = db.execute("SELECT key, value FROM app_settings WHERE key LIKE 'tax_%'").fetchall()
+            for r in tax_rows:
+                m = int(r["key"].replace("tax_",""))
+                tax_payments[m] = float(r["value"])
+            # Loan opening balance (manual)
+            lob = db.execute("SELECT value FROM app_settings WHERE key='loan_opening_balance'").fetchone()
+            if lob: loan_opening_bal = float(lob["value"])
+    except: pass
+    
+    # ── AR: Accounts Receivable ──
+    # AR = cumulative revenue recognized (by invoice_date) - cumulative cash received
+    # This correctly captures: invoice issued → AR increases, payment received → AR decreases
+    ar_by_month = [0.0] * 12
+    cum_invoiced = 0; cum_received = 0
+    for i in range(12):
+        cum_invoiced += data[i]["revenue"]  # P&L revenue (by invoice_date)
+        cum_received += data[i]["cashIn"]   # Cash Flow receipts (by payment date/DSO)
+        ar_by_month[i] = round(max(0, cum_invoiced - cum_received), 2)
+    
+    # ── AP: Accounts Payable ──
+    # AP from vendor invoices: exists from due_date until paid_date
+    # For expenses without specific invoices: accrued monthly, "paid" same month (AP = 0)
+    ap_by_month = [0.0] * 12
+    try:
+        with get_db() as db:
+            inv_rows = db.execute("SELECT amount, currency, due_date, paid_amount, paid_date, status FROM invoices").fetchall()
+        for inv in inv_rows:
+            if not inv["due_date"]: continue
+            try:
+                dd = date.fromisoformat(inv["due_date"])
+                if dd.year != FY: continue
+                due_mi = dd.month - 1
+                amt_usd = to_usd(inv["amount"], inv["currency"] or "ILS", ML[due_mi])
+                paid_usd = to_usd(inv["paid_amount"] or 0, inv["currency"] or "ILS", ML[due_mi])
+                remaining = amt_usd - paid_usd
+                if remaining <= 0: continue
+                # AP exists from due_date month until paid_date month (exclusive)
+                # If not paid, AP persists through Dec
+                paid_mi = 12  # default: not paid within FY
+                if inv["paid_date"] and inv["status"] == "paid":
+                    try:
+                        pd3 = date.fromisoformat(inv["paid_date"])
+                        if pd3.year == FY: paid_mi = pd3.month  # exclusive: AP cleared in payment month
+                        elif pd3.year < FY: continue  # paid before FY, no AP
+                    except: pass
+                # AP balance exists from due month through month before payment
+                for mi6 in range(due_mi, min(paid_mi, 12)):
+                    ap_by_month[mi6] += remaining
+            except: pass
+    except: pass
+    
+    # ── Loan balances per month ──
+    loan_bal_by_month = [0.0] * 12
+    loan_remaining = loan_opening_bal
+    # Build map of new loans by start month
+    loan_additions = [0.0] * 12
+    for ln in loans:
+        try:
+            lsd = date.fromisoformat(ln["start_date"])
+            if lsd.year == FY and 1 <= lsd.month <= 12:
+                loan_additions[lsd.month - 1] += to_usd(ln["amount"], ln.get("currency","ILS"), ML[lsd.month-1])
+        except: pass
+    # Calculate balance per month: add new loans, subtract principal repayments
+    for i in range(12):
+        loan_remaining += loan_additions[i]
+        loan_remaining -= data[i].get("loanPrincipal", 0)
+        loan_bal_by_month[i] = round(max(0, loan_remaining), 2)
+    
+    # Load payroll payment defaults
+    payroll_defaults = {"net_day": 9, "net_offset": 1, "tax_day": 15, "tax_offset": 1, "pension_day": 15, "pension_offset": 1}
+    try:
+        with get_db() as db:
+            for key, field in [("payroll_net_day","net_day"),("payroll_net_month_offset","net_offset"),
+                               ("payroll_tax_day","tax_day"),("payroll_tax_month_offset","tax_offset"),
+                               ("payroll_pension_day","pension_day"),("payroll_pension_month_offset","pension_offset")]:
+                r = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+                if r: payroll_defaults[field] = int(r["value"])
+    except: pass
+    
+    # Build payroll cash flow arrays: distribute by payment dates
+    cf_net_pay = [0.0] * 12     # Net salary cash out per month
+    cf_tax_pay = [0.0] * 12     # Tax cash out per month
+    cf_pension_pay = [0.0] * 12 # Pension+SS+SF+Disability cash out per month
+    
+    for accrual_mi in range(12):
+        accrual_ml = ML[accrual_mi]
+        pc = payroll_components[accrual_mi]
+        
+        # Default targets (next month)
+        net_target_mi = min(accrual_mi + payroll_defaults["net_offset"], 11)
+        tax_target_mi = min(accrual_mi + payroll_defaults["tax_offset"], 11)
+        pension_target_mi = min(accrual_mi + payroll_defaults["pension_offset"], 11)
+        
+        # Level 1: Snapshot-level overrides (Save Payroll Month)
+        for eid_ml, snap in snap_by_emp_month.items():
+            if eid_ml[1] == accrual_ml:
+                if snap.get("net_pay_date"):
+                    try:
+                        npd = date.fromisoformat(snap["net_pay_date"])
+                        if npd.year == FY: net_target_mi = npd.month - 1
+                    except: pass
+                if snap.get("tax_pay_date"):
+                    try:
+                        tpd = date.fromisoformat(snap["tax_pay_date"])
+                        if tpd.year == FY: tax_target_mi = tpd.month - 1
+                    except: pass
+                if snap.get("pension_pay_date"):
+                    try:
+                        ppd = date.fromisoformat(snap["pension_pay_date"])
+                        if ppd.year == FY: pension_target_mi = ppd.month - 1
+                    except: pass
+                break
+        
+        # Level 2: Per-employee payment dates override everything
+        # Distribute each employee's components individually
+        p2 = accrual_ml.split("-")
+        md2 = date(int(p2[1]), int(p2[0]), 1)
+        emp_net = 0; emp_tax = 0; emp_pension = 0
+        for e in employees:
+            h2 = date.fromisoformat(e["hire_date"]); t2 = date.fromisoformat(e["term_date"]) if e["term_date"] else None
+            if not (md2 >= h2 and (not t2 or md2 <= t2)): continue
+            
+            snap = snap_by_emp_month.get((e["id"], accrual_ml))
+            eg = snap["gross"] if snap else e["gross"]
+            eb = snap.get("bonus",0) if snap else e.get("bonus",0)
+            ep = snap.get("position_pct",100) if snap else e.get("position_pct",100)
+            ecur = snap.get("currency","ILS") if snap else e.get("currency","ILS")
+            epen = snap.get("pension_pct",8.33) if snap else e.get("pension_pct",8.33)
+            edis = snap.get("disability_pct",2.5) if snap else e.get("disability_pct",2.5)
+            esf = snap.get("study_fund_pct",7.5) if snap else e.get("study_fund_pct",7.5)
+            esfs = snap.get("study_fund_salary",0) if snap else e.get("study_fund_salary",0)
+            
+            _, bd = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur)
+            
+            # Per-employee payment date overrides
+            e_net_mi = net_target_mi
+            e_tax_mi = tax_target_mi
+            e_pen_mi = pension_target_mi
+            
+            if e.get("pay_net_date"):
+                try:
+                    nd = date.fromisoformat(e["pay_net_date"])
+                    offset = (nd.year - FY) * 12 + nd.month - 1 - 0
+                    e_net_mi = min(max(accrual_mi + offset, 0), 11) if offset != 0 else nd.month - 1
+                    if nd.year == FY: e_net_mi = nd.month - 1
+                except: pass
+            if e.get("pay_tax_date"):
+                try:
+                    td2 = date.fromisoformat(e["pay_tax_date"])
+                    if td2.year == FY: e_tax_mi = td2.month - 1
+                except: pass
+            if e.get("pay_pension_date"):
+                try:
+                    pd4 = date.fromisoformat(e["pay_pension_date"])
+                    if pd4.year == FY: e_pen_mi = pd4.month - 1
+                except: pass
+            
+            cf_net_pay[e_net_mi] += to_usd(bd["gross"] + bd["bonus"], ecur, accrual_ml)
+            cf_pension_pay[e_pen_mi] += to_usd(bd["socialSecurity"] + bd["pension"] + bd["studyFund"] + bd["disability"], ecur, accrual_ml)
+        
+        cf_tax_pay[tax_target_mi] += tax_payments.get(accrual_mi + 1, 0)
+    
+    for i, d in enumerate(data):
+        d["ar"] = ar_by_month[i]
+        d["ap"] = round(ap_by_month[i], 2)
+        d["loanBalance"] = loan_bal_by_month[i]
         d["revenue"]=round(d["revenue"],2); d["cashIn"]=round(d["cashIn"],2)
         d["grossProfit"]=round(d["revenue"]-d["cogs"],2)
         d["grossMargin"]=round(d["grossProfit"]/d["revenue"]*100,1) if d["revenue"]>0 else 0
         d["netIncome"]=round(d["revenue"]-d["totalExp"],2)
-        d["cashOut"]=d["totalExp"]; d["netCashflow"]=round(d["cashIn"]-d["cashOut"],2)
+        
+        # Payroll CF from pre-computed arrays
+        d["cfGross"] = round(cf_net_pay[i], 2)
+        d["cfSS"] = 0  # included in cfPension below
+        d["cfPension"] = round(cf_pension_pay[i], 2)
+        d["cfStudyFund"] = 0  # included in cfPension
+        d["cfDisability"] = 0  # included in cfPension
+        d["cfTax"] = round(cf_tax_pay[i], 2)
+        
+        # Payroll accruals for balance sheet (what we owe at end of month)
+        pc = payroll_components[i]
+        d["accrualGross"] = round(pc["grossNet"], 2)
+        d["accrualSS"] = round(pc["ss"], 2)
+        d["accrualPension"] = round(pc["pension"], 2)
+        d["accrualSF"] = round(pc["studyFund"], 2)
+        d["accrualDisability"] = round(pc["disability"], 2)
+        d["accrualTax"] = round(tax_payments.get(i + 1, 0), 2)
+        
+        # Total payroll cash out
+        d["cfPayrollTotal"] = round(d["cfGross"] + d["cfPension"] + d["cfTax"], 2)
+        
+        d["cashOut"]=round(d["cfPayrollTotal"] + d.get("vendorCashOut", sum(d["vd"].values())), 2)
+        d["netCashflow"]=round(d["cashIn"]-d["cashOut"],2)
         cum+=d["netCashflow"]; d["cumCash"]=round(cum,2)
-        d["burnRate"]=round(d["cashOut"]-d["cashIn"],2) if d["cashOut"]>d["cashIn"] else 0
-        d["runway"]=round(cum/d["burnRate"],1) if d["burnRate"]>0 else None
+        
+        # Burn rates — based on CASH FLOW, not P&L
+        # Net burn = OpEx cash out (no COGS) minus cash in
+        opex_cash = sum(d["lab"].values()) - d["lab"].get("R&D", 0) + sum(d["vd"].values()) - sum(v for k,v in d["vd"].items() if k == "R&D")
+        d["burnNet"] = round(opex_cash - d["cashIn"], 2) if opex_cash > d["cashIn"] else 0
+        # Gross burn = Total cash out (including loan payments) minus cash in
+        total_cash_out = d["cashOut"] + d.get("loanPayment", 0)
+        d["burnGross"] = round(total_cash_out - d["cashIn"], 2) if total_cash_out > d["cashIn"] else 0
+        # Legacy
+        d["burnRate"] = d["burnGross"]
+        # Runway based on gross burn
+        d["runway"] = round(cum / d["burnGross"], 1) if d["burnGross"] > 0 else None
+    
+    # Quarterly aggregation — based on Cash Flow
+    for qi in range(4):
+        ms = data[qi*3:qi*3+3]
+        if not ms: continue
+        q_rev = sum(m["revenue"] for m in ms)
+        q_cashIn = sum(m["cashIn"] for m in ms)
+        q_cashOut = sum(m["cashOut"] + m.get("loanPayment", 0) for m in ms)
+        q_opexCash = sum(sum(m["lab"].values()) - m["lab"].get("R&D",0) + sum(m["vd"].values()) - sum(v for k,v in m["vd"].items() if k=="R&D") for m in ms)
+        q_burnNet = round(q_opexCash - q_cashIn, 2) if q_opexCash > q_cashIn else 0
+        q_burnGross = round(q_cashOut - q_cashIn, 2) if q_cashOut > q_cashIn else 0
+        q_label = f"Q{qi+1}"
+        for m in ms:
+            m["quarter"] = q_label
+            m["qBurnNet"] = q_burnNet
+            m["qBurnGross"] = q_burnGross
+            m["qRevenue"] = round(q_rev, 2)
+            m["qExpenses"] = round(q_cashOut, 2)
+            m["qNetCashflow"] = round(q_cashIn - q_cashOut, 2)
+    
+    # Runway recalc with trailing 3-month avg gross burn
+    for i, d in enumerate(data):
+        start = max(0, i - 2)
+        trailing = data[start:i+1]
+        avg_burn = sum(m["burnGross"] for m in trailing) / len(trailing)
+        d["runwayAvg"] = round(d["cumCash"] / avg_burn, 1) if avg_burn > 0 else None
+    
     return data
 
 # ══════════════════════════════════════════
@@ -561,12 +1165,28 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "paymentSplits":json.loads(c.get("payment_splits","[]")) if c.get("payment_splits") else [],
          "paymentMethod":c.get("payment_method",""),
          "isNewClient":bool(c.get("is_new_client",1)),
+         "invoiceDate":c.get("invoice_date",""),
+         "subjectToVat":bool(c.get("subject_to_vat",0)),
          "createdAt":c["created_at"],"updatedAt":c["updated_at"]} for c in contracts]
-    es=[{"id":e["id"],"name":e["name"],"dept":e["dept"],"gross":e["gross"],
+    es=[]
+    for e in employees:
+        total_cost, breakdown = calc_employer_cost(
+            e["gross"], e.get("bonus",0), e.get("position_pct",100),
+            e.get("pension_pct",8.33), e.get("disability_pct",2.5),
+            e.get("study_fund_pct",7.5), e.get("study_fund_salary",0),
+            e.get("currency","ILS"))
+        es.append({"id":e["id"],"name":e["name"],"dept":e["dept"],"gross":e["gross"],
          "positionPct":e.get("position_pct",100),"bonus":e.get("bonus",0),
          "currency":e.get("currency","ILS"),
-         "laborCost":round(to_usd((e["gross"]+e.get("bonus",0))*ECF*(e.get("position_pct",100)/100.0), e.get("currency","ILS")),2),
-         "hireDate":e["hire_date"],"termDate":e["term_date"]} for e in employees]
+         "pensionPct":e.get("pension_pct",8.33),
+         "disabilityPct":e.get("disability_pct",2.5),
+         "studyFundPct":e.get("study_fund_pct",7.5),
+         "studyFundSalary":e.get("study_fund_salary",0),
+         "costBreakdown":breakdown,
+         "laborCost":round(to_usd(total_cost, e.get("currency","ILS")),2),
+         "laborCostMonthly":round(total_cost,2),
+         "hireDate":e["hire_date"],"termDate":e["term_date"],
+         "payNetDate":e.get("pay_net_date",""),"payTaxDate":e.get("pay_tax_date",""),"payPensionDate":e.get("pay_pension_date","")})
     xs=[{"id":x["id"],"dept":x["dept"],"vendor":x["vendor"],"subCat":x["sub_cat"],
          "isCogs":x["is_cogs"]==1,"expenseType":["OpEx","COGS","CapEx"][min(x["is_cogs"],2)],"currency":x.get("currency","ILS"),
          "amount":round(to_usd(sum(x["amounts"].values())/max(len(x["amounts"]),1), x.get("currency","ILS")),2),
@@ -576,6 +1196,11 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "vendorBankNum":x.get("vendor_bank_num",""),"vendorBranchNum":x.get("vendor_branch_num",""),
          "vendorAccountNum":x.get("vendor_account_num",""),
          "isFixed":bool(x.get("is_fixed",1)),
+         "paymentDates":x.get("payment_dates",{}),
+         "expenseInvoiceDate":x.get("expense_invoice_date",""),
+         "expensePaymentDate":x.get("expense_payment_date",""),
+         "isRecurring":bool(x.get("is_recurring",1)),
+         "subjectToVat":bool(x.get("subject_to_vat",1)),
          "frequency":x.get("frequency","monthly"),
          "paymentMethod":x.get("payment_method","")} for x in expenses]
     sp=load_salespeople()
@@ -585,8 +1210,20 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
         pm_rows = db.execute("SELECT * FROM payment_methods WHERE is_active=1 ORDER BY sort_order").fetchall()
     pms = [{"id":p["id"],"name":p["name"],"bankGroup":p["bank_group"]} for p in pm_rows]
     return {"summary":s,"contracts":cs,"employees":es,"expenses":xs,
+            "vatRate": round(get_vat_rate() * 100),
             "salespeople":[{"id":p["id"],"name":p["display_name"]} for p in sp],
-            "stages":STAGES,"exchangeRate":rate,"paymentMethods":pms}
+            "stages":STAGES,"exchangeRate":rate,"paymentMethods":pms,
+            "loans":[{"id":ln["id"],"lender":ln["lender"],"amount":ln["amount"],"termMonths":ln["term_months"],
+                      "annualRate":ln["annual_rate"],"startDate":ln["start_date"],"repaymentType":ln["repayment_type"],
+                      "currency":ln.get("currency","ILS"),"notes":ln.get("notes",""),
+                      "interestStartMonth":ln.get("interest_start_month","")} for ln in load_loans()],
+            "incomeSources": [{"id":inc["id"],"client":inc["client"],"category":inc.get("category",""),
+                               "currency":inc.get("currency","ILS"),
+                               "contactName":inc.get("contact_name",""),"contactPhone":inc.get("contact_phone",""),
+                               "contactEmail":inc.get("contact_email",""),
+                               "isRecurring":bool(inc.get("is_recurring",0)),
+                               "subjectToVat":bool(inc.get("subject_to_vat",0)),
+                               "notes":inc.get("notes","")} for inc in load_income_sources()]}
 
 @app.get("/api/sales-analytics")
 def sales_analytics(weighted:bool=True):
@@ -714,6 +1351,8 @@ class ContractUpdate(BaseModel):
     contactName:Optional[str]=None; contactPhone:Optional[str]=None
     contactEmail:Optional[str]=None; contactLinkedin:Optional[str]=None
     paymentMethod:Optional[str]=None; isNewClient:Optional[bool]=None
+    invoiceDate:Optional[str]=None
+    subjectToVat:Optional[bool]=None
 
 @app.put("/api/contracts/{cid}")
 def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
@@ -736,6 +1375,8 @@ def upd_contract(cid:str, b:ContractUpdate, user=Depends(get_current_user)):
     if b.contactLinkedin is not None: fields.append("contact_linkedin=?"); vals.append(b.contactLinkedin)
     if b.paymentMethod is not None: fields.append("payment_method=?"); vals.append(b.paymentMethod)
     if b.isNewClient is not None: fields.append("is_new_client=?"); vals.append(int(b.isNewClient))
+    if b.invoiceDate is not None: fields.append("invoice_date=?"); vals.append(b.invoiceDate)
+    if b.subjectToVat is not None: fields.append("subject_to_vat=?"); vals.append(int(b.subjectToVat))
     if not fields: return {"ok":True}
     fields.append("updated_at=?"); vals.append(now)
     vals.append(cid)
@@ -772,6 +1413,9 @@ class EmployeeUpdate(BaseModel):
     name:Optional[str]=None; department:Optional[str]=None
     gross:Optional[float]=None; positionPct:Optional[float]=None
     bonus:Optional[float]=None; currency:Optional[str]=None; termDate:Optional[str]=None
+    pensionPct:Optional[float]=None; disabilityPct:Optional[float]=None
+    studyFundPct:Optional[float]=None; studyFundSalary:Optional[float]=None
+    payNetDate:Optional[str]=None; payTaxDate:Optional[str]=None; payPensionDate:Optional[str]=None
 
 @app.put("/api/employees/{eid}")
 def upd_employee(eid:str, b:EmployeeUpdate, user=Depends(require_admin)):
@@ -783,6 +1427,13 @@ def upd_employee(eid:str, b:EmployeeUpdate, user=Depends(require_admin)):
     if b.bonus is not None: fields.append("bonus=?"); vals.append(b.bonus)
     if b.currency is not None: fields.append("currency=?"); vals.append(b.currency)
     if b.termDate is not None: fields.append("term_date=?"); vals.append(b.termDate if b.termDate else None)
+    if b.pensionPct is not None: fields.append("pension_pct=?"); vals.append(b.pensionPct)
+    if b.disabilityPct is not None: fields.append("disability_pct=?"); vals.append(b.disabilityPct)
+    if b.studyFundPct is not None: fields.append("study_fund_pct=?"); vals.append(b.studyFundPct)
+    if b.studyFundSalary is not None: fields.append("study_fund_salary=?"); vals.append(b.studyFundSalary)
+    if b.payNetDate is not None: fields.append("pay_net_date=?"); vals.append(b.payNetDate)
+    if b.payTaxDate is not None: fields.append("pay_tax_date=?"); vals.append(b.payTaxDate)
+    if b.payPensionDate is not None: fields.append("pay_pension_date=?"); vals.append(b.payPensionDate)
     if not fields: return {"ok":True}
     vals.append(eid)
     with get_db() as db:
@@ -799,7 +1450,7 @@ class ExpenseIn(BaseModel):
     vendorContact:str=""; vendorEmail:str=""; vendorPhone:str=""; serviceDesc:str=""
     frequency:str="monthly"; currency:str="ILS"
 
-FREQ_MULTIPLIERS = {"monthly":1,"bimonthly":0.5,"quarterly":1/3,"semi_annual":1/6,"annual":1/12}
+FREQ_MULTIPLIERS = {"monthly":1,"one_time":0,"bimonthly":0.5,"quarterly":1/3,"semi_annual":1/6,"annual":1/12}
 
 @app.post("/api/expenses")
 def add_expense(b:ExpenseIn, user=Depends(require_admin)):
@@ -820,6 +1471,10 @@ class ExpenseUpdate(BaseModel):
     paymentMethod:Optional[str]=None
     vendorBankNum:Optional[str]=None; vendorBranchNum:Optional[str]=None
     vendorAccountNum:Optional[str]=None; isFixed:Optional[bool]=None
+    paymentDates:Optional[dict]=None
+    expenseInvoiceDate:Optional[str]=None; expensePaymentDate:Optional[str]=None
+    isRecurring:Optional[bool]=None
+    subjectToVat:Optional[bool]=None
 
 @app.put("/api/expenses/{xid}")
 def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
@@ -839,6 +1494,11 @@ def upd_expense(xid:str, b:ExpenseUpdate, user=Depends(require_admin)):
     if b.vendorBranchNum is not None: fields.append("vendor_branch_num=?"); vals.append(b.vendorBranchNum)
     if b.vendorAccountNum is not None: fields.append("vendor_account_num=?"); vals.append(b.vendorAccountNum)
     if b.isFixed is not None: fields.append("is_fixed=?"); vals.append(int(b.isFixed))
+    if b.paymentDates is not None: fields.append("payment_dates=?"); vals.append(json.dumps(b.paymentDates))
+    if b.expenseInvoiceDate is not None: fields.append("expense_invoice_date=?"); vals.append(b.expenseInvoiceDate)
+    if b.expensePaymentDate is not None: fields.append("expense_payment_date=?"); vals.append(b.expensePaymentDate)
+    if b.isRecurring is not None: fields.append("is_recurring=?"); vals.append(int(b.isRecurring))
+    if b.subjectToVat is not None: fields.append("subject_to_vat=?"); vals.append(int(b.subjectToVat))
     if b.monthlyAmount is not None or b.frequency is not None:
         freq = b.frequency
         amt = b.monthlyAmount
@@ -1316,6 +1976,513 @@ def dismiss_alert(b: DismissAlert, user=Depends(get_current_user)):
                    (aid, b.alertKey, uid, now, b.actionNote))
     return {"ok": True}
 
+class TaxPayment(BaseModel):
+    month: int  # 1-12
+    amount: float
+
+@app.post("/api/tax-payment")
+def set_tax_payment(b: TaxPayment, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                   (f"tax_{b.month}", str(b.amount)))
+    return {"ok": True}
+
+# ══════════════════════════════════════════
+# LOANS
+# ══════════════════════════════════════════
+def load_loans():
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM loans ORDER BY start_date").fetchall()
+    return [dict(r) for r in rows]
+
+def calc_loan_schedule(amount, term_months, annual_rate, start_date_str, repayment_type, interest_start_month=""):
+    monthly_rate = annual_rate / 100 / 12
+    schedule = []
+    remaining = amount
+    try: sd = date.fromisoformat(start_date_str)
+    except: sd = date(2026, 1, 1)
+    
+    # Determine when interest starts
+    interest_start = None
+    if interest_start_month:
+        try:
+            parts = interest_start_month.split("-")
+            interest_start = date(int(parts[1]), int(parts[0]), 1)
+        except: pass
+    
+    for i in range(term_months):
+        m = (sd.month + i - 1) % 12 + 1
+        y = sd.year + (sd.month + i - 1) // 12
+        pay_date = date(y, m, min(sd.day, 28))
+        
+        # Check if interest has started yet
+        charge_interest = True
+        if interest_start and pay_date < interest_start:
+            charge_interest = False
+        
+        interest = remaining * monthly_rate if charge_interest else 0
+        if repayment_type == 'interest_only':
+            principal = remaining if i == term_months - 1 else 0
+            payment = interest + principal
+        elif repayment_type == 'principal_only':
+            principal = amount / term_months; interest = 0; payment = principal
+        elif repayment_type == 'balloon':
+            # Grace period: pay nothing until last month, then pay everything
+            principal = remaining if i == term_months - 1 else 0
+            payment = principal + (interest if i == term_months - 1 else 0)
+            if i < term_months - 1:
+                interest = 0; payment = 0  # true grace — no payments at all
+        else:
+            if monthly_rate > 0:
+                payment = amount * monthly_rate / (1 - (1 + monthly_rate) ** (-term_months))
+            else:
+                payment = amount / term_months
+            principal = payment - interest
+        remaining = max(0, remaining - principal)
+        schedule.append({"month": i+1, "date": pay_date.isoformat(), "payment": round(payment,2),
+                         "principal": round(principal,2), "interest": round(interest,2), "remaining": round(remaining,2)})
+    return schedule
+
+@app.get("/api/loans")
+def get_loans(user=Depends(require_admin)):
+    loans = load_loans()
+    result = []
+    for ln in loans:
+        sch = calc_loan_schedule(ln["amount"], ln["term_months"], ln["annual_rate"], ln["start_date"], ln["repayment_type"], ln.get("interest_start_month",""))
+        result.append({"id":ln["id"],"lender":ln["lender"],"amount":ln["amount"],
+            "termMonths":ln["term_months"],"annualRate":ln["annual_rate"],
+            "startDate":ln["start_date"],"repaymentType":ln["repayment_type"],
+            "currency":ln.get("currency","ILS"),"notes":ln.get("notes",""),
+            "totalPayment":round(sum(s["payment"] for s in sch),2),
+            "totalInterest":round(sum(s["interest"] for s in sch),2),
+            "schedule":sch})
+    return result
+
+class LoanIn(BaseModel):
+    lender:str; amount:float; termMonths:int; annualRate:float=0
+    startDate:str; repaymentType:str="principal_interest"
+    currency:str="ILS"; notes:str=""
+    interestStartMonth:str=""
+
+@app.post("/api/loans")
+def add_loan(b: LoanIn, user=Depends(require_admin)):
+    lid = f"ln_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO loans (id,lender,amount,term_months,annual_rate,start_date,repayment_type,currency,notes,interest_start_month,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                   (lid,b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,now))
+    return {"ok":True,"id":lid}
+
+@app.put("/api/loans/{lid}")
+def upd_loan(lid:str, b:LoanIn, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("UPDATE loans SET lender=?,amount=?,term_months=?,annual_rate=?,start_date=?,repayment_type=?,currency=?,notes=?,interest_start_month=? WHERE id=?",
+                   (b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,lid))
+    return {"ok":True}
+
+@app.delete("/api/loans/{lid}")
+def del_loan(lid:str, user=Depends(require_admin)):
+    with get_db() as db: db.execute("DELETE FROM loans WHERE id=?",(lid,))
+    return {"ok":True}
+
+class LoanOpeningBalance(BaseModel):
+    amount: float
+
+@app.put("/api/loans/opening-balance")
+def set_loan_opening_balance(b: LoanOpeningBalance, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('loan_opening_balance', ?)", (str(b.amount),))
+    return {"ok": True}
+
+# ══════════════════════════════════════════
+# CAP TABLE
+# ══════════════════════════════════════════
+@app.get("/api/cap-table")
+def get_cap_table(user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM cap_table ORDER BY shares DESC").fetchall()
+    entries = [dict(r) for r in rows]
+    total_shares = sum(e["shares"] for e in entries)
+    esop_shares = sum(e["shares"] for e in entries if e["is_esop"])
+    return {"entries": [{"id":e["id"],"holderName":e["holder_name"],"shares":e["shares"],
+                         "isEsop":bool(e["is_esop"]),"notes":e.get("notes",""),
+                         "pct":round(e["shares"]/total_shares*100,2) if total_shares>0 else 0} for e in entries],
+            "totalShares":total_shares, "esopShares":esop_shares,
+            "esopPct":round(esop_shares/total_shares*100,2) if total_shares>0 else 0}
+
+class CapEntry(BaseModel):
+    holderName:str; shares:float; isEsop:bool=False; notes:str=""
+
+@app.post("/api/cap-table")
+def add_cap_entry(b: CapEntry, user=Depends(require_admin)):
+    cid = f"cap_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO cap_table (id,holder_name,shares,is_esop,notes,created_at) VALUES (?,?,?,?,?,?)",
+                   (cid, b.holderName, b.shares, int(b.isEsop), b.notes, now))
+    return {"ok":True,"id":cid}
+
+@app.put("/api/cap-table/{cid}")
+def upd_cap_entry(cid:str, b:CapEntry, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("UPDATE cap_table SET holder_name=?,shares=?,is_esop=?,notes=? WHERE id=?",
+                   (b.holderName, b.shares, int(b.isEsop), b.notes, cid))
+    return {"ok":True}
+
+@app.delete("/api/cap-table/{cid}")
+def del_cap_entry(cid:str, user=Depends(require_admin)):
+    with get_db() as db: db.execute("DELETE FROM cap_table WHERE id=?",(cid,))
+    return {"ok":True}
+
+# ══════════════════════════════════════════
+# USER PREFERENCES (layout order)
+# ══════════════════════════════════════════
+@app.get("/api/preferences")
+def get_preferences(user=Depends(get_current_user)):
+    with get_db() as db:
+        rows = db.execute("SELECT pref_key, pref_value FROM user_preferences WHERE user_id=?", (user["sub"],)).fetchall()
+    return {r["pref_key"]: json.loads(r["pref_value"]) for r in rows}
+
+class PrefUpdate(BaseModel):
+    key: str
+    value: list
+
+@app.put("/api/preferences")
+def set_preference(b: PrefUpdate, user=Depends(get_current_user)):
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO user_preferences (user_id, pref_key, pref_value) VALUES (?,?,?)",
+                   (user["sub"], b.key, json.dumps(b.value)))
+    return {"ok": True}
+
+# ══════════════════════════════════════════
+# ACTION ITEMS
+# ══════════════════════════════════════════
+class ActionItemIn(BaseModel):
+    contractId: str
+    description: str
+    dueDate: str
+
+@app.post("/api/actions")
+def add_action(b: ActionItemIn, user=Depends(get_current_user)):
+    aid = f"act_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO action_items (id,contract_id,user_id,description,due_date,created_at) VALUES (?,?,?,?,?,?)",
+                   (aid, b.contractId, user["sub"], b.description, b.dueDate, now))
+    return {"ok": True, "id": aid}
+
+@app.put("/api/actions/{aid}/complete")
+def complete_action(aid: str, user=Depends(get_current_user)):
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("UPDATE action_items SET completed=1, completed_at=? WHERE id=? AND user_id=?", (now, aid, user["sub"]))
+    return {"ok": True}
+
+@app.delete("/api/actions/{aid}")
+def delete_action(aid: str, user=Depends(get_current_user)):
+    with get_db() as db:
+        db.execute("DELETE FROM action_items WHERE id=? AND user_id=?", (aid, user["sub"]))
+    return {"ok": True}
+
+@app.get("/api/actions/today")
+def get_today_actions(user=Depends(get_current_user)):
+    today = date.today().isoformat()
+    with get_db() as db:
+        role = db.execute("SELECT role, can_see_all FROM users WHERE id=?", (user["sub"],)).fetchone()
+        is_manager = role and role["role"] in ("admin", "sales_manager")
+        
+        if is_manager:
+            # Manager sees everyone's actions
+            rows = db.execute("""SELECT a.*, c.client, u.display_name as assignee FROM action_items a 
+                                LEFT JOIN contracts c ON a.contract_id=c.id
+                                LEFT JOIN users u ON a.user_id=u.id
+                                WHERE a.completed=0 AND a.due_date<=?
+                                ORDER BY a.due_date""", (today,)).fetchall()
+        else:
+            # Sales rep sees only their own
+            rows = db.execute("""SELECT a.*, c.client, u.display_name as assignee FROM action_items a 
+                                LEFT JOIN contracts c ON a.contract_id=c.id
+                                LEFT JOIN users u ON a.user_id=u.id
+                                WHERE a.user_id=? AND a.completed=0 AND a.due_date<=?
+                                ORDER BY a.due_date""", (user["sub"], today)).fetchall()
+    return [{"id":r["id"],"contractId":r["contract_id"],"client":r["client"] or "Unknown",
+             "description":r["description"],"dueDate":r["due_date"],
+             "assignee":r["assignee"] or "Unknown","userId":r["user_id"],
+             "isOverdue":r["due_date"]<today,"isToday":r["due_date"]==today} for r in rows]
+
+@app.get("/api/actions/contract/{cid}")
+def get_contract_actions(cid: str, user=Depends(get_current_user)):
+    with get_db() as db:
+        rows = db.execute("""SELECT * FROM action_items WHERE contract_id=? AND user_id=? 
+                            ORDER BY completed, due_date""", (cid, user["sub"])).fetchall()
+    return [{"id":r["id"],"description":r["description"],"dueDate":r["due_date"],
+             "completed":bool(r["completed"]),"completedAt":r["completed_at"]} for r in rows]
+
+# ══════════════════════════════════════════
+# ══════════════════════════════════════════
+# EXPENSE PAYMENTS (per month payment dates)
+# ══════════════════════════════════════════
+class ExpensePayment(BaseModel):
+    expenseId: str
+    amount: float
+    invoiceDate: str = ""
+    paymentDate: str = ""
+    notes: str = ""
+
+@app.post("/api/expense-payment")
+def save_expense_payment(b: ExpensePayment, user=Depends(require_admin)):
+    """Save a single invoice entry for an expense. Multiple allowed per month."""
+    epid = f"ep_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    # Determine month from invoice_date
+    month = ""
+    if b.invoiceDate:
+        try:
+            d2 = date.fromisoformat(b.invoiceDate)
+            month = f"{d2.month:02d}-{d2.year}"
+        except: pass
+    with get_db() as db:
+        db.execute("""INSERT INTO expense_payments 
+                     (id, expense_id, month, amount, invoice_date, payment_date, notes, created_at)
+                     VALUES (?,?,?,?,?,?,?,?)""",
+                   (epid, b.expenseId, month, b.amount, b.invoiceDate, b.paymentDate, b.notes, now))
+    return {"ok": True, "id": epid}
+
+@app.delete("/api/expense-payment/{epid}")
+def delete_expense_payment(epid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM expense_payments WHERE id=?", (epid,))
+    return {"ok": True}
+
+@app.get("/api/expense-payments/{expense_id}")
+def get_expense_payments(expense_id: str, user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM expense_payments WHERE expense_id=? ORDER BY invoice_date", (expense_id,)).fetchall()
+    return [{"id":r["id"],"month":r["month"],"amount":r["amount"],
+             "invoiceDate":r["invoice_date"] or "","paymentDate":r["payment_date"] or "",
+             "notes":r["notes"] or ""} for r in rows]
+
+# SALARY SNAPSHOTS
+# ══════════════════════════════════════════
+
+# ══════════════════════════════════════════
+# INCOME SOURCES & PAYMENTS
+# ══════════════════════════════════════════
+class IncomeSourceIn(BaseModel):
+    client: str
+    category: str = ""
+    currency: str = "ILS"
+    contactName: str = ""
+    contactPhone: str = ""
+    contactEmail: str = ""
+    isRecurring: bool = False
+    subjectToVat: bool = False
+    notes: str = ""
+
+@app.post("/api/income")
+def add_income_source(b: IncomeSourceIn, user=Depends(require_admin)):
+    iid = f"inc_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("""INSERT INTO income_sources (id,client,category,currency,contact_name,contact_phone,
+                      contact_email,is_recurring,subject_to_vat,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (iid, b.client, b.category, b.currency, b.contactName, b.contactPhone,
+                    b.contactEmail, int(b.isRecurring), int(b.subjectToVat), b.notes, now))
+    return {"ok": True, "id": iid}
+
+class IncomeSourceUpdate(BaseModel):
+    client: Optional[str] = None
+    category: Optional[str] = None
+    currency: Optional[str] = None
+    contactName: Optional[str] = None
+    contactPhone: Optional[str] = None
+    contactEmail: Optional[str] = None
+    isRecurring: Optional[bool] = None
+    subjectToVat: Optional[bool] = None
+    notes: Optional[str] = None
+
+@app.put("/api/income/{iid}")
+def upd_income_source(iid: str, b: IncomeSourceUpdate, user=Depends(require_admin)):
+    fields = []; vals = []
+    if b.client is not None: fields.append("client=?"); vals.append(b.client)
+    if b.category is not None: fields.append("category=?"); vals.append(b.category)
+    if b.currency is not None: fields.append("currency=?"); vals.append(b.currency)
+    if b.contactName is not None: fields.append("contact_name=?"); vals.append(b.contactName)
+    if b.contactPhone is not None: fields.append("contact_phone=?"); vals.append(b.contactPhone)
+    if b.contactEmail is not None: fields.append("contact_email=?"); vals.append(b.contactEmail)
+    if b.isRecurring is not None: fields.append("is_recurring=?"); vals.append(int(b.isRecurring))
+    if b.subjectToVat is not None: fields.append("subject_to_vat=?"); vals.append(int(b.subjectToVat))
+    if b.notes is not None: fields.append("notes=?"); vals.append(b.notes)
+    if not fields: return {"ok": True}
+    vals.append(iid)
+    with get_db() as db:
+        db.execute(f"UPDATE income_sources SET {','.join(fields)} WHERE id=?", vals)
+    return {"ok": True}
+
+@app.delete("/api/income/{iid}")
+def del_income_source(iid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM income_sources WHERE id=?", (iid,))
+        db.execute("DELETE FROM income_payments WHERE income_id=?", (iid,))
+    return {"ok": True}
+
+class IncomePaymentIn(BaseModel):
+    incomeId: str
+    amount: float
+    invoiceDate: str = ""
+    paymentDate: str = ""
+    notes: str = ""
+
+@app.post("/api/income-payment")
+def add_income_payment(b: IncomePaymentIn, user=Depends(require_admin)):
+    ipid = f"ip_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    month = ""
+    if b.invoiceDate:
+        try:
+            d2 = date.fromisoformat(b.invoiceDate)
+            month = f"{d2.month:02d}-{d2.year}"
+        except: pass
+    with get_db() as db:
+        db.execute("""INSERT INTO income_payments (id,income_id,amount,invoice_date,payment_date,notes,created_at)
+                     VALUES (?,?,?,?,?,?,?)""",
+                   (ipid, b.incomeId, b.amount, b.invoiceDate, b.paymentDate, b.notes, now))
+    return {"ok": True, "id": ipid}
+
+@app.delete("/api/income-payment/{ipid}")
+def del_income_payment(ipid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM income_payments WHERE id=?", (ipid,))
+    return {"ok": True}
+
+@app.get("/api/income-payments/{income_id}")
+def get_income_payments(income_id: str, user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM income_payments WHERE income_id=? ORDER BY invoice_date", (income_id,)).fetchall()
+    return [{"id":r["id"],"amount":r["amount"],
+             "invoiceDate":r["invoice_date"] or "","paymentDate":r["payment_date"] or "",
+             "notes":r["notes"] or ""} for r in rows]
+
+# ══════════════════════════════════════════
+class SnapshotMonth(BaseModel):
+    month: str
+    netPayDate: str = ""
+    taxPayDate: str = ""
+    pensionPayDate: str = ""
+
+@app.post("/api/salary-snapshot")
+def save_salary_snapshot(b: SnapshotMonth, user=Depends(require_admin)):
+    """Snapshot current employee data for a specific month with payment dates."""
+    employees = load_employees()
+    now = datetime.now().isoformat()
+    count = 0
+    with get_db() as db:
+        for e in employees:
+            if e["term_date"]:
+                try:
+                    td = date.fromisoformat(e["term_date"])
+                    p = b.month.split("-")
+                    md = date(int(p[1]), int(p[0]), 1)
+                    if md > td: continue
+                except: pass
+            try:
+                hd = date.fromisoformat(e["hire_date"])
+                p = b.month.split("-")
+                md = date(int(p[1]), int(p[0]), 1)
+                if md < hd: continue
+            except: pass
+            
+            sid = f"ss_{e['id']}_{b.month.replace('-','')}"
+            db.execute("""INSERT OR REPLACE INTO salary_snapshots 
+                         (id, employee_id, month, gross, position_pct, bonus, currency, dept,
+                          pension_pct, disability_pct, study_fund_pct, study_fund_salary,
+                          net_pay_date, tax_pay_date, pension_pay_date, created_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       (sid, e["id"], b.month, e["gross"], e.get("position_pct", 100),
+                        e.get("bonus", 0), e.get("currency", "ILS"), e["dept"],
+                        e.get("pension_pct", 8.33), e.get("disability_pct", 2.5),
+                        e.get("study_fund_pct", 7.5), e.get("study_fund_salary", 0),
+                        b.netPayDate, b.taxPayDate, b.pensionPayDate, now))
+            count += 1
+    return {"ok": True, "count": count, "month": b.month}
+
+@app.get("/api/salary-snapshots")
+def get_salary_snapshots(user=Depends(require_admin)):
+    """Get list of months that have snapshots."""
+    with get_db() as db:
+        rows = db.execute("SELECT DISTINCT month, COUNT(*) as cnt, MAX(created_at) as saved_at FROM salary_snapshots GROUP BY month ORDER BY month").fetchall()
+    return [{"month": r["month"], "count": r["cnt"], "savedAt": r["saved_at"]} for r in rows]
+
+def load_employee_for_month(employee_id, month_str):
+    """Get employee data for a specific month: snapshot if available, else current."""
+    with get_db() as db:
+        snap = db.execute("SELECT * FROM salary_snapshots WHERE employee_id=? AND month=?", 
+                         (employee_id, month_str)).fetchone()
+    if snap:
+        return dict(snap)
+    return None  # Caller uses current employee data
+
+# SENSITIVITY ANALYSIS
+# ══════════════════════════════════════════
+class SensitivityScenario(BaseModel):
+    name: str = "Scenario"
+    revenueChangePct: float = 0
+    expenseChangePct: float = 0
+    fxChangePct: float = 0
+    revenueDelayMonths: int = 0
+    expenseDelayMonths: int = 0
+
+@app.post("/api/sensitivity")
+def compute_sensitivity(scenarios: list[SensitivityScenario], user=Depends(require_admin)):
+    base = compute(0, 0, 15000, False)
+    months_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    base_data = {
+        "labels": months_labels,
+        "revenue": [round(m["revenue"], 2) for m in base],
+        "cashIn": [round(m["cashIn"], 2) for m in base],
+        "expenses": [round(m["totalExp"], 2) for m in base],
+        "netIncome": [round(m["netIncome"], 2) for m in base],
+        "cumCash": [round(m["cumCash"], 2) for m in base],
+    }
+    results = []
+    for sc in scenarios:
+        adj_revenue = list(base_data["revenue"])
+        adj_cashIn = list(base_data["cashIn"])
+        adj_expenses = list(base_data["expenses"])
+        if sc.revenueChangePct != 0:
+            f = 1 + sc.revenueChangePct / 100
+            adj_revenue = [round(r * f, 2) for r in adj_revenue]
+            adj_cashIn = [round(r * f, 2) for r in adj_cashIn]
+        if sc.revenueDelayMonths > 0:
+            d = sc.revenueDelayMonths
+            adj_revenue = [0.0]*d + adj_revenue[:12-d]
+            adj_cashIn = [0.0]*d + adj_cashIn[:12-d]
+        if sc.expenseChangePct != 0:
+            f = 1 + sc.expenseChangePct / 100
+            adj_expenses = [round(e * f, 2) for e in adj_expenses]
+        if sc.expenseDelayMonths > 0:
+            d = sc.expenseDelayMonths
+            adj_expenses = [0.0]*d + adj_expenses[:12-d]
+        if sc.fxChangePct != 0:
+            fx = 1 + sc.fxChangePct / 100
+            adj_revenue = [round(r * (0.7 + 0.3 * fx), 2) for r in adj_revenue]
+            adj_cashIn = [round(r * (0.7 + 0.3 * fx), 2) for r in adj_cashIn]
+            adj_expenses = [round(e * (0.4 + 0.6 * fx), 2) for e in adj_expenses]
+        adj_net = [round(adj_revenue[i] - adj_expenses[i], 2) for i in range(12)]
+        cum = 0; adj_cum = []
+        for i in range(12):
+            cum += adj_cashIn[i] - adj_expenses[i]
+            adj_cum.append(round(cum, 2))
+        results.append({
+            "name": sc.name, "revenue": adj_revenue, "cashIn": adj_cashIn,
+            "expenses": adj_expenses, "netIncome": adj_net, "cumCash": adj_cum,
+            "totals": {"revenue": round(sum(adj_revenue), 2), "expenses": round(sum(adj_expenses), 2),
+                       "netIncome": round(sum(adj_net), 2), "endCash": adj_cum[-1] if adj_cum else 0}
+        })
+    return {"base": base_data, "scenarios": results, "baseTotals": {
+        "revenue": round(sum(base_data["revenue"]), 2), "expenses": round(sum(base_data["expenses"]), 2),
+        "netIncome": round(sum(base_data["netIncome"]), 2), "endCash": base_data["cumCash"][-1] if base_data["cumCash"] else 0}}
+
 # SCENARIOS (What-If)
 # ══════════════════════════════════════════
 @app.get("/api/scenarios")
@@ -1415,12 +2582,13 @@ def compute_scenario(sid: str, user=Depends(require_admin)):
             dept = cfg.get("dept", "S&M")
             cost_orig = cfg.get("monthlyCost", 0)
             cur = cfg.get("currency", "ILS")
-            cost_usd = to_usd(cost_orig, cur) * ECF
+            total_hire, _ = calc_employer_cost(cost_orig, 0, 100, 8.33, 2.5, 7.5, 0, cur)
             start_m = cfg.get("startMonth", 1) - 1
             
             # Add labor cost from start month
             for mi in range(start_m, 12):
-                scenario_months[mi]["lab"][dept] = scenario_months[mi]["lab"].get(dept, 0) + cost_usd
+                cost_usd_m = to_usd(total_hire, cur, ML[mi])
+                scenario_months[mi]["lab"][dept] = scenario_months[mi]["lab"].get(dept, 0) + cost_usd_m
                 scenario_months[mi]["totalExp"] = scenario_months[mi].get("totalExp", 0) + cost_usd
                 scenario_months[mi]["addedExp"] += cost_usd
             
@@ -1450,14 +2618,14 @@ def compute_scenario(sid: str, user=Depends(require_admin)):
                         scenario_months[mi]["addedRev"] += rev
         
         elif itype == "expense_change":
-            # Change existing expense: vendor, newAmount, currency, fromMonth
-            new_amt = to_usd(cfg.get("newAmount", 0), cfg.get("currency", "USD"))
-            old_amt = to_usd(cfg.get("oldAmount", 0), cfg.get("currency", "USD"))
+            exp_cur = cfg.get("currency", "USD")
             dept = cfg.get("dept", "G&A")
             from_m = cfg.get("fromMonth", 1) - 1
-            delta = new_amt - old_amt
             
             for mi in range(from_m, 12):
+                new_amt = to_usd(cfg.get("newAmount", 0), exp_cur, ML[mi])
+                old_amt = to_usd(cfg.get("oldAmount", 0), exp_cur, ML[mi])
+                delta = new_amt - old_amt
                 scenario_months[mi]["vd"][dept] = scenario_months[mi]["vd"].get(dept, 0) + delta
                 scenario_months[mi]["totalExp"] = scenario_months[mi].get("totalExp", 0) + delta
                 scenario_months[mi]["addedExp"] += delta
@@ -1638,6 +2806,19 @@ def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
             "openingBalanceUsd": round(opening, 2),
             "closingBalanceUsd": round(closing, 2),
             "banks": {bg: {"opening": round(banks_data[bg]["opening"] * conv, 2), "closing": round(banks_data[bg]["closing"] * conv, 2), "isManual": banks_data[bg]["isManual"]} for bg in bank_groups},
+            # Payroll breakdown for cash flow
+            "cfGross": round(s.get("cfGross", 0) * conv, 2),
+            "cfSS": round(s.get("cfSS", 0) * conv, 2),
+            "cfPension": round(s.get("cfPension", 0) * conv, 2),
+            "cfStudyFund": round(s.get("cfStudyFund", 0) * conv, 2),
+            "cfDisability": round(s.get("cfDisability", 0) * conv, 2),
+            "cfTax": round(s.get("cfTax", 0) * conv, 2),
+            "loanInterest": round(s.get("loanInterest", 0) * conv, 2),
+            "loanPrincipal": round(s.get("loanPrincipal", 0) * conv, 2),
+            "loanPayment": round(s.get("loanPayment", 0) * conv, 2),
+            # Detailed breakdowns
+            "labByDept": {k: round(v * conv, 2) for k, v in s["lab"].items() if v > 0},
+            "vdByDept": {k: round(v * conv, 2) for k, v in s["vd"].items() if v > 0},
         }
         months.append(month_data)
         prev_closing = closing
