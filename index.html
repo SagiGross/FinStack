@@ -1226,193 +1226,109 @@ function loadManualBS(){
   });
 }
 
-var sumYear=2026;
+// sumFrom/sumTo defined above with cfFrom/cfTo
 function renderFinancialSummary(){
   var el=document.getElementById('st-fsum');if(!el)return;
   
-  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">';
   h+='<h2 style="margin:0">Financial Summary</h2>';
-  h+='<select id="sumYearSel" style="padding:6px 12px;font-size:13px;font-weight:700;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px">';
-  for(var y=2025;y<=2027;y++) h+='<option value="'+y+'"'+(y===sumYear?' selected':'')+'>FY '+y+'</option>';
-  h+='</select></div>';
+  h+=buildRangePicker('sum',sumFrom,sumTo);
+  h+='</div>';
   h+='<div id="sumContent"><div style="padding:40px;text-align:center;color:var(--txM)">Loading...</div></div>';
   el.innerHTML=h;
   
-  document.getElementById('sumYearSel').addEventListener('change',function(){sumYear=parseInt(this.value);renderFinancialSummary()});
+  document.getElementById('sumFrom').addEventListener('change',function(){sumFrom=parseRange(this.value);renderFinancialSummary()});
+  document.getElementById('sumTo').addEventListener('change',function(){sumTo=parseRange(this.value);renderFinancialSummary()});
   
-  if(sumYear===2026){
-    renderSummary2026();
-  } else {
-    loadSummaryManual();
-  }
+  loadRangeData(sumFrom,sumTo,function(months,labels){
+    renderSummaryFromData(months,labels);
+  });
 }
 
-function renderSummary2026(){
-  var d=D.summary;
-  var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var tr=d.reduce(function(s,m){return s+m.revenue},0);
-  var tc=d.reduce(function(s,m){return s+m.cogs},0);
-  var tgp=d.reduce(function(s,m){return s+m.grossProfit},0);
-  var top2=d.reduce(function(s,m){return s+m.opex},0);
-  var tni=d.reduce(function(s,m){return s+m.netIncome},0);
-  var last=d[d.length-1];
-  var avgBurnNet=d.reduce(function(s,m){return s+(m.burnNet||0)},0)/12;
-  var avgBurnGross=d.reduce(function(s,m){return s+(m.burnGross||0)},0)/12;
+function renderSummaryFromData(months,labels){
+  var tr=months.reduce(function(s,m){return s+m.revenue},0);
+  var tc=months.reduce(function(s,m){return s+m.cogs},0);
+  var tgp=months.reduce(function(s,m){return s+m.grossProfit},0);
+  var top2=months.reduce(function(s,m){return s+m.opex},0);
+  var tni=months.reduce(function(s,m){return s+m.netIncome},0);
+  var totalOut=months.reduce(function(s,m){return s+m.cashOut},0);
+  var avgBurn=totalOut/months.length;
+  var endBal=months[months.length-1].cumCash;
+  var period=labels[0]+' - '+labels[labels.length-1];
 
   var h='';
   h+='<div class="kg" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">';
-  h+=kpi('\u2197','Revenue',finFmt(tr),'FY2026','var(--gn)');
-  h+=kpi('\u2699','COGS',finFmt(tc),'FY2026','var(--am)',30);
+  h+=kpi('\u2197','Revenue',finFmt(tr),period,'var(--gn)');
+  h+=kpi('\u2699','COGS',finFmt(tc),period,'var(--am)',30);
   h+=kpi('\u2248','Gross Profit',finFmt(tgp),(tr>0?((tgp/tr*100).toFixed(1)+'% margin'):''),'var(--gn)',60);
-  h+=kpi('\u2198','OpEx',finFmt(top2),'FY2026','var(--rd)',90);
-  h+=kpi('\u2605','Net Income',finFmt(tni),'FY2026',tni>=0?'var(--gn)':'var(--rd)',120);
+  h+=kpi('\u2198','OpEx',finFmt(top2),period,'var(--rd)',90);
+  h+=kpi('\u2605','Net Income',finFmt(tni),period,tni>=0?'var(--gn)':'var(--rd)',120);
   h+='</div>';
 
-  h+='<div class="kg" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">';
-  h+=kpi('\u2587','Cash Position',finFmt(last.cumCash),'End of Year',last.cumCash>=0?'var(--ac)':'var(--rd)');
-  h+=kpi('\u25CB','Net Burn/mo',finFmt(avgBurnNet),'OpEx - Revenue','var(--am)',30);
-  h+=kpi('\u25CF','Gross Burn/mo',finFmt(avgBurnGross),'All Exp - Revenue','var(--rd)',60);
-  h+=kpi('\u231A','Runway',last.runwayAvg?last.runwayAvg.toFixed(1)+' mo':'\u221e','3-mo avg burn','var(--cy)',90);
-  h+=kpi('\u26A1','Cash In',finFmt(d.reduce(function(s,m){return s+m.cashIn},0)),'FY2026','var(--gn)',120);
-  h+='</div>';
-
-  h+='<div class="cg cg2" style="margin-bottom:16px">';
-  h+='<div class="cc"><div class="cc-t">Gross Profit & Margin</div><div style="height:260px"><canvas id="chGP2"></canvas></div></div>';
-  h+='<div class="cc"><div class="cc-t">Burn Rate — Net vs Gross</div><div style="height:260px"><canvas id="chBurn2"></canvas></div></div>';
+  h+='<div class="kg" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">';
+  h+=kpi('\u25CF','Burn/mo',finFmt(avgBurn),'Average','var(--am)');
+  h+=kpi('\u231A','Runway',avgBurn>0?(Math.abs(endBal)/avgBurn).toFixed(1)+' mo':'\u221e','Months left','var(--cy)',30);
+  h+=kpi('\u2587','End Balance',finFmt(endBal),'Cumulative',endBal>=0?'var(--ac)':'var(--rd)',60);
+  var finTotal=months.reduce(function(s,m){return s+m.finance},0);
+  h+=kpi('\u26A1','Finance Cost',finFmt(finTotal),period,'var(--rd)',90);
   h+='</div>';
 
   h+='<div class="cg cg2" style="margin-bottom:16px">';
-  h+='<div class="cc"><div class="cc-t">Cash Position & Runway</div><div style="height:260px"><canvas id="chCP2"></canvas></div></div>';
-
-  h+='<div class="cc"><div class="cc-t">Quarterly Breakdown</div>';
-  h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left;width:20%"></th><th style="text-align:right;width:16%">Q1</th><th style="text-align:right;width:16%">Q2</th><th style="text-align:right;width:16%">Q3</th><th style="text-align:right;width:16%">Q4</th><th style="text-align:right;width:16%;font-weight:800">FY</th></tr></thead><tbody>';
-  var quarters=[[0,1,2],[3,4,5],[6,7,8],[9,10,11]];
-  function qSum(field){return quarters.map(function(q){return q.reduce(function(s,i){return s+(d[i]?d[i][field]||0:0)},0)})}
-  function qRow(label,vals,style){
-    var total=vals.reduce(function(a,b){return a+b},0);
-    h+='<tr style="'+(style||'')+'"><td style="font-weight:600">'+label+'</td>';
-    vals.forEach(function(v){h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
-    h+='<td class="mono" style="text-align:right;font-weight:800;'+(total<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
-  }
-  qRow('Revenue',qSum('revenue'),'color:var(--gn)');
-  qRow('COGS',qSum('cogs'));
-  qRow('OpEx',qSum('opex'));
-  qRow('Net Income',qSum('netIncome'),'font-weight:700;border-top:1px solid var(--bd)');
-  h+='<tr><td colspan="6" style="padding:6px 0"></td></tr>';
-  qRow('Net Burn',quarters.map(function(q){return q.reduce(function(s,i){return s+(d[i]?(d[i].burnNet||0):0)},0)}),'color:var(--am)');
-  qRow('Gross Burn',quarters.map(function(q){return q.reduce(function(s,i){return s+(d[i]?(d[i].burnGross||0):0)},0)}),'color:var(--rd)');
-  var qCash=quarters.map(function(q){return d[q[q.length-1]]?d[q[q.length-1]].cumCash:0});
-  qRow('End Cash',qCash,'font-weight:700;border-top:1px solid var(--bd)');
-  h+='</tbody></table></div></div>';
+  h+='<div class="cc"><div class="cc-t">Monthly P&L</div><div style="height:260px"><canvas id="chSumPL"></canvas></div></div>';
+  h+='<div class="cc"><div class="cc-t">Gross Profit & Margin</div><div style="height:260px"><canvas id="chSumGP"></canvas></div></div>';
   h+='</div>';
 
-  document.getElementById('sumContent').innerHTML=h;
-  mk('chGP2',{type:'bar',data:{labels:months,datasets:[
-    {label:'Gross Profit',data:d.map(function(m){return m.grossProfit}),backgroundColor:'#10b981aa',borderRadius:4,yAxisID:'y'},
-    {label:'GM %',data:d.map(function(m){return m.grossMargin}),type:'line',borderColor:'#f59e0b',borderWidth:2,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',tension:.4,yAxisID:'y1'}
-  ]},options:{scales:{y:{position:'left',ticks:{callback:function(v){return finFmt(v)}}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:function(v){return v+'%'}}}}}});
-  mk('chBurn2',{type:'bar',data:{labels:months,datasets:[
-    {label:'Net Burn',data:d.map(function(m){return m.burnNet||0}),backgroundColor:'#f59e0b88',borderRadius:4},
-    {label:'Gross Burn',data:d.map(function(m){return m.burnGross||0}),backgroundColor:'#ef444488',borderRadius:4}
-  ]},options:{scales:{y:{ticks:{callback:function(v){return finFmt(v)}}}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
-  mk('chCP2',{type:'line',data:{labels:months,datasets:[
-    {label:'Cash',data:d.map(function(m){return m.cumCash}),borderColor:'#3b82f6',borderWidth:3,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',tension:.4,fill:{target:'origin',above:'rgba(59,130,246,0.1)',below:'rgba(239,68,68,0.1)'}},
-    {label:'Runway (mo)',data:d.map(function(m){return m.runwayAvg}),borderColor:'#06b6d4',borderWidth:1.5,borderDash:[4,4],pointRadius:0,tension:.4,yAxisID:'y1'}
-  ]},options:{scales:{y:{position:'left',ticks:{callback:function(v){return finFmt(v)}}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:function(v){return v+' mo'}}}}}});
-}
-
-function loadSummaryManual(){
-  Promise.all([
-    authFetch('/api/pl-data/'+sumYear).then(function(r){return r.json()}),
-    authFetch('/api/monthly-rates/'+sumYear).then(function(r){return r.json()})
-  ]).then(function(results){
-    var data=results[0];var rates=results[1];
-    var cats=data.categories;
-    var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    function getRate(mi){return rates[String(mi)]||3.5}
-    function toUsd(v,cur,mi){return cur==='ILS'?v/getRate(mi):v}
-    
-    // Build monthly arrays from manual data
-    var revArr=[];var cogsArr=[];var opexArr=[];var finArr=[];var netArr=[];
-    for(var i=1;i<=12;i++){
-      var rev=0,cogs=0,opex=0,fin=0;
-      cats.forEach(function(c){
-        var v=toUsd(c.months[String(i)]||0,c.currency||'USD',i);
-        if(c.section==='revenue') rev+=v;
-        else if(c.section==='cogs') cogs+=v;
-        else if(c.section==='finance') fin+=v;
-        else opex+=v; // ga_expenses, sm_expenses, rd_expenses, opex all go here
-      });
-      revArr.push(rev);cogsArr.push(Math.abs(cogs));opexArr.push(Math.abs(opex));finArr.push(Math.abs(fin));
-      netArr.push(rev+cogs+opex+fin);
+  // Quarterly summary (if enough months)
+  if(months.length>=3){
+    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Periodic Breakdown</div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px;table-layout:fixed"><thead><tr><th style="text-align:left;width:20%"></th>';
+    // Group by quarters
+    var qSize=3;var qCount=Math.ceil(months.length/qSize);
+    for(var qi=0;qi<qCount;qi++){
+      var qStart=qi*qSize;var qEnd=Math.min(qStart+qSize-1,months.length-1);
+      h+='<th style="text-align:right;width:'+(60/qCount)+'%">'+labels[qStart]+'-'+labels[qEnd]+'</th>';
     }
-    var gpArr=revArr.map(function(r,i){return r-cogsArr[i]});
-    var gmArr=revArr.map(function(r,i){return r>0?(gpArr[i]/r*100):0});
+    h+='<th style="text-align:right;width:15%;font-weight:800">Total</th></tr></thead><tbody>';
     
-    var tr=revArr.reduce(function(a,b){return a+b},0);
-    var tc=cogsArr.reduce(function(a,b){return a+b},0);
-    var tgp=gpArr.reduce(function(a,b){return a+b},0);
-    var top2=opexArr.reduce(function(a,b){return a+b},0);
-    var tni=netArr.reduce(function(a,b){return a+b},0);
-    var finArr2=0;cats.forEach(function(c){if(c.section==='finance')for(var i=1;i<=12;i++) finArr2+=Math.abs(toUsd(c.months[String(i)]||0,c.currency||'USD',i))});
-    var avgBurn=(tc+top2+finArr2)/12;
-    var cumCashEnd=tni; // simplified: P&L = CF
-    
-    var h='';
-    h+='<div class="kg" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">';
-    h+=kpi('\u2197','Revenue',finFmt(tr),'FY'+sumYear,'var(--gn)');
-    h+=kpi('\u2699','COGS',finFmt(tc),'FY'+sumYear,'var(--am)',30);
-    h+=kpi('\u2248','Gross Profit',finFmt(tgp),(tr>0?((tgp/tr*100).toFixed(1)+'% margin'):''),'var(--gn)',60);
-    h+=kpi('\u2198','OpEx',finFmt(top2),'FY'+sumYear,'var(--rd)',90);
-    h+=kpi('\u2605','Net Income',finFmt(tni),'FY'+sumYear,tni>=0?'var(--gn)':'var(--rd)',120);
-    h+='</div>';
-    
-    h+='<div class="kg" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">';
-    h+=kpi('\u25CF','Avg Burn/mo',finFmt(avgBurn),'Monthly','var(--am)');
-    h+=kpi('\u231A','Runway',avgBurn>0?(cumCashEnd/avgBurn).toFixed(1)+' mo':'\u221e','Based on avg','var(--cy)',30);
-    h+=kpi('\u2248','Net CF',finFmt(tni),'P&L \u2248 CF',tni>=0?'var(--gn)':'var(--rd)',60);
-    var finTotal=0;cats.forEach(function(c){if(c.section==='finance')for(var i=1;i<=12;i++) finTotal+=Math.abs(toUsd(c.months[String(i)]||0,c.currency||'USD',i))});
-    h+=kpi('\u26A1','Finance Cost',finFmt(finTotal),'FY'+sumYear,'var(--rd)',90);
-    h+='</div>';
-    
-    // Charts
-    h+='<div class="cg cg2" style="margin-bottom:16px">';
-    h+='<div class="cc"><div class="cc-t">Monthly P&L</div><div style="height:260px"><canvas id="chSumPL"></canvas></div></div>';
-    h+='<div class="cc"><div class="cc-t">Gross Profit & Margin</div><div style="height:260px"><canvas id="chSumGP"></canvas></div></div>';
-    h+='</div>';
-    
-    // Quarterly table
-    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Quarterly Breakdown</div>';
-    h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px;table-layout:fixed"><thead><tr><th style="text-align:left;width:20%"></th><th style="text-align:right;width:16%">Q1</th><th style="text-align:right;width:16%">Q2</th><th style="text-align:right;width:16%">Q3</th><th style="text-align:right;width:16%">Q4</th><th style="text-align:right;width:16%;font-weight:800">FY</th></tr></thead><tbody>';
-    var quarters=[[0,1,2],[3,4,5],[6,7,8],[9,10,11]];
-    function qSumArr(arr){return quarters.map(function(q){return q.reduce(function(s,i){return s+(arr[i]||0)},0)})}
-    function qRow2(label,vals,style){
-      var total=vals.reduce(function(a,b){return a+b},0);
+    function qRowS(label,fn,style){
+      var total=0;
       h+='<tr style="'+(style||'')+'"><td style="font-weight:600">'+label+'</td>';
-      vals.forEach(function(v){h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>'});
+      for(var qi2=0;qi2<qCount;qi2++){
+        var v=0;for(var j=qi2*qSize;j<Math.min((qi2+1)*qSize,months.length);j++) v+=fn(months[j]);
+        total+=v;
+        h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+finFmt(v)+'</td>';
+      }
       h+='<td class="mono" style="text-align:right;font-weight:800;'+(total<0?'color:var(--rd)':'')+'">'+finFmt(total)+'</td></tr>';
     }
-    qRow2('Revenue',qSumArr(revArr),'color:var(--gn)');
-    qRow2('COGS',qSumArr(cogsArr.map(function(v){return -v})));
-    qRow2('OpEx',qSumArr(opexArr.map(function(v){return -v})));
-    qRow2('Finance',qSumArr(finArr.map(function(v){return -v})));
-    qRow2('Net Income',qSumArr(netArr),'font-weight:700;border-top:1px solid var(--bd)');
+    qRowS('Revenue',function(m){return m.revenue},'color:var(--gn)');
+    qRowS('COGS',function(m){return -m.cogs});
+    qRowS('OpEx',function(m){return -m.opex});
+    qRowS('Finance',function(m){return -m.finance});
+    qRowS('Net Income',function(m){return m.netIncome},'font-weight:700;border-top:1px solid var(--bd)');
     h+='</tbody></table></div></div>';
-    
-    document.getElementById('sumContent').innerHTML=h;
-    
-    mk('chSumPL',{type:'bar',data:{labels:months,datasets:[
-      {label:'Revenue',data:revArr,backgroundColor:'#10b981aa',borderRadius:4},
-      {label:'COGS',data:cogsArr,backgroundColor:'#f59e0b88',borderRadius:4},
-      {label:'OpEx',data:opexArr,backgroundColor:'#ef444488',borderRadius:4},
-      {label:'Net',data:netArr,type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4}
-    ]}});
-    mk('chSumGP',{type:'bar',data:{labels:months,datasets:[
-      {label:'Gross Profit',data:gpArr,backgroundColor:'#10b981aa',borderRadius:4,yAxisID:'y'},
-      {label:'GM %',data:gmArr,type:'line',borderColor:'#f59e0b',borderWidth:2,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',tension:.4,yAxisID:'y1'}
-    ]},options:{scales:{y:{position:'left',ticks:{callback:function(v){return finFmt(v)}}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:function(v){return v+'%'}}}}}});
-  });
+  }
+  
+  document.getElementById('sumContent').innerHTML=h;
+  
+  var revenue=months.map(function(m){return m.revenue});
+  var cogs=months.map(function(m){return m.cogs});
+  var opex=months.map(function(m){return m.opex});
+  var netIncome=months.map(function(m){return m.netIncome});
+  var gpArr=months.map(function(m){return m.grossProfit});
+  var gmArr=months.map(function(m){return m.grossMargin});
+  
+  mk('chSumPL',{type:'bar',data:{labels:labels,datasets:[
+    {label:'Revenue',data:revenue,backgroundColor:'#10b981aa',borderRadius:4},
+    {label:'COGS',data:cogs,backgroundColor:'#f59e0b88',borderRadius:4},
+    {label:'OpEx',data:opex,backgroundColor:'#ef444488',borderRadius:4},
+    {label:'Net',data:netIncome,type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4}
+  ]}});
+  mk('chSumGP',{type:'bar',data:{labels:labels,datasets:[
+    {label:'Gross Profit',data:gpArr,backgroundColor:'#10b981aa',borderRadius:4,yAxisID:'y'},
+    {label:'GM %',data:gmArr,type:'line',borderColor:'#f59e0b',borderWidth:2,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#f59e0b',tension:.4,yAxisID:'y1'}
+  ]},options:{scales:{y:{position:'left',ticks:{callback:function(v){return finFmt(v)}}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:function(v){return v+'%'}}}}}});
 }
+
 
 function renderFinancial(){
   var d=D.summary;
@@ -2768,12 +2684,195 @@ function renderSalesDashContent(el){
 // CASH FLOW REPORT
 // ══════════════════════════════════════════
 var cfCurrency='USD';
-var cfYear=2026;
+var cfFrom={m:1,y:2026};var cfTo={m:12,y:2026};
+var sumFrom={m:1,y:2026};var sumTo={m:12,y:2026};
 var finCurrency='USD';
 function finConv(n){if(finCurrency==='ILS'){return n*(D.exchangeRate||3.12)}return n}
 function finFmt(n){if(n==null)return'\u2014';var v=finConv(n);var sym=finCurrency==='ILS'?'\u20AA':'$';var a=Math.abs(v);var s=v<0?'-':'';if(a>=1e6)return s+sym+(a/1e6).toFixed(2)+'M';if(a>=1e3)return s+sym+(a/1e3).toFixed(1)+'K';return s+sym+a.toFixed(0)}
+
+function buildRangePicker(prefix,from,to){
+  var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h='<div style="display:flex;gap:6px;align-items:center">';
+  h+='<select id="'+prefix+'From" style="padding:5px 8px;font-size:11px;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:5px">';
+  for(var y=2025;y<=2027;y++) for(var m=1;m<=12;m++){
+    var sel=(m===from.m&&y===from.y)?' selected':'';
+    h+='<option value="'+m+'-'+y+'"'+sel+'>'+months[m-1]+' '+y+'</option>';
+  }
+  h+='</select><span style="color:var(--txM);font-size:11px">to</span>';
+  h+='<select id="'+prefix+'To" style="padding:5px 8px;font-size:11px;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:5px">';
+  for(var y=2025;y<=2027;y++) for(var m=1;m<=12;m++){
+    var sel=(m===to.m&&y===to.y)?' selected':'';
+    h+='<option value="'+m+'-'+y+'"'+sel+'>'+months[m-1]+' '+y+'</option>';
+  }
+  h+='</select>';
+  h+='</div>';
+  return h;
+}
+
+function parseRange(val){var p=val.split('-');return{m:parseInt(p[0]),y:parseInt(p[1])}}
+
+function loadRangeData(from,to,callback){
+  // Determine which years we need
+  var years={};
+  var cur={m:from.m,y:from.y};
+  while(cur.y<to.y||(cur.y===to.y&&cur.m<=to.m)){
+    years[cur.y]=true;
+    cur.m++;if(cur.m>12){cur.m=1;cur.y++}
+  }
+  var yearList=Object.keys(years).map(Number);
+  
+  // Load pl_manual for non-2026 years, compute for 2026
+  var promises=[];
+  yearList.forEach(function(yr){
+    if(yr===2026){
+      // Use D.summary (already loaded)
+      promises.push(Promise.resolve({year:2026,type:'computed'}));
+    } else {
+      promises.push(
+        Promise.all([
+          authFetch('/api/pl-data/'+yr).then(function(r){return r.json()}),
+          authFetch('/api/monthly-rates/'+yr).then(function(r){return r.json()})
+        ]).then(function(res){return{year:yr,type:'manual',data:res[0],rates:res[1]}})
+      );
+    }
+  });
+  
+  Promise.all(promises).then(function(results){
+    var months=[];var labels=[];
+    var monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var cur2={m:from.m,y:from.y};
+    
+    while(cur2.y<to.y||(cur2.y===to.y&&cur2.m<=to.m)){
+      var yr=cur2.y;var mi=cur2.m;
+      var label=monthNames[mi-1]+(yearList.length>1?' '+(yr%100):'');
+      labels.push(label);
+      
+      if(yr===2026){
+        var d=D.summary[mi-1];
+        if(d){
+          months.push({revenue:d.revenue,cogs:d.cogs,opex:d.opex,finance:(d.lab.Finance||0)+(d.vd.Finance||0),
+                       netIncome:d.netIncome,cashIn:d.cashIn,cashOut:d.cashOut||0,
+                       grossProfit:d.grossProfit,grossMargin:d.grossMargin,
+                       burnNet:d.burnNet||0,burnGross:d.burnGross||0,cumCash:d.cumCash||0,
+                       payroll:d.cfPayrollTotal||0,vendors:d.vendorCashOut||0,
+                       loans:d.loanPayment||0,year:yr,month:mi});
+        } else {
+          months.push({revenue:0,cogs:0,opex:0,finance:0,netIncome:0,cashIn:0,cashOut:0,grossProfit:0,grossMargin:0,burnNet:0,burnGross:0,cumCash:0,payroll:0,vendors:0,loans:0,year:yr,month:mi});
+        }
+      } else {
+        var yearData=results.find(function(r){return r.year===yr});
+        if(yearData&&yearData.data){
+          var cats=yearData.data.categories;var rates=yearData.rates;
+          function getR(m2){return(rates&&rates[String(m2)])||3.5}
+          function toU(v,cur,m2){return cur==='ILS'?v/getR(m2):v}
+          var rev=0,cogs2=0,ga=0,sm=0,rd=0,fin=0;
+          cats.forEach(function(c){
+            var v=toU(c.months[String(mi)]||0,c.currency||'USD',mi);
+            if(c.section==='revenue') rev+=v;
+            else if(c.section==='cogs') cogs2+=Math.abs(v);
+            else if(c.section==='ga_expenses'||c.section==='opex') ga+=Math.abs(v);
+            else if(c.section==='sm_expenses') sm+=Math.abs(v);
+            else if(c.section==='rd_expenses') rd+=Math.abs(v);
+            else if(c.section==='finance') fin+=Math.abs(v);
+          });
+          var totalOut=cogs2+ga+sm+rd+fin;
+          var gp=rev-cogs2;
+          months.push({revenue:rev,cogs:cogs2,opex:ga+sm+rd,finance:fin,
+                       netIncome:rev-totalOut,cashIn:rev,cashOut:totalOut,
+                       grossProfit:gp,grossMargin:rev>0?(gp/rev*100):0,
+                       burnNet:totalOut-rev,burnGross:totalOut,cumCash:0,
+                       payroll:0,vendors:ga+sm+rd,loans:0,
+                       ga:ga,sm:sm,rd:rd,
+                       year:yr,month:mi});
+        } else {
+          months.push({revenue:0,cogs:0,opex:0,finance:0,netIncome:0,cashIn:0,cashOut:0,grossProfit:0,grossMargin:0,burnNet:0,burnGross:0,cumCash:0,payroll:0,vendors:0,loans:0,year:yr,month:mi});
+        }
+      }
+      cur2.m++;if(cur2.m>12){cur2.m=1;cur2.y++}
+    }
+    
+    // Compute cumulative cash
+    var cum=0;
+    months.forEach(function(m){cum+=m.cashIn-(m.cashOut||m.cogs+m.opex+m.finance);m.cumCash=cum});
+    
+    callback(months,labels);
+  });
+}
+
 function renderCashFlow(el){
-  if(cfYear!==2026){renderCashFlowManual(el);return}
+  // Check if pure 2026 year (use detailed API) or mixed range (use loadRangeData)
+  if(cfFrom.y===2026&&cfTo.y===2026&&cfFrom.m===1&&cfTo.m===12){
+    renderCashFlow2026(el);return;
+  }
+  // Range mode
+  el.innerHTML='<div style="padding:40px;text-align:center;color:var(--txM)">Loading...</div>';
+  loadRangeData(cfFrom,cfTo,function(months,labels){
+    var sym=cfCurrency==='ILS'?'\u20AA':'$';
+    function toCF(v){return cfCurrency==='ILS'?v*(D.exchangeRate||3.5):v}
+    function fmtCF(n){if(n==null)return'\u2014';var v=toCF(n);var a=Math.abs(v);var s=v<0?'-':'';if(a>=1e6)return s+sym+(a/1e6).toFixed(2)+'M';if(a>=1e3)return s+sym+(a/1e3).toFixed(1)+'K';return s+sym+a.toFixed(0)}
+    
+    var totalIn=months.reduce(function(s,m){return s+m.cashIn},0);
+    var totalOut=months.reduce(function(s,m){return s+m.cashOut},0);
+    var netTotal=totalIn-totalOut;
+    var endBal=months[months.length-1].cumCash;
+    var avgBurn=totalOut/months.length;
+    
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">';
+    h+='<h2 style="margin:0">Cash Flow Report</h2>';
+    h+='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+    h+=buildRangePicker('cf',cfFrom,cfTo);
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:5px 12px;font-size:11px;'+(cfCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$</button>';
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:5px 12px;font-size:11px;'+(cfCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">\u20AA</button>';
+    h+='</div></div>';
+    
+    h+='<div class="kg" style="grid-template-columns:repeat(6,1fr);margin-bottom:16px">';
+    h+=kpi('\u2197','Cash In',fmtCF(totalIn),'Period','var(--gn)');
+    h+=kpi('\u2198','Cash Out',fmtCF(totalOut),'Period','var(--rd)',30);
+    h+=kpi('\u2248','Net CF',fmtCF(netTotal),'Period',netTotal>=0?'var(--gn)':'var(--rd)',60);
+    h+=kpi('\u2587','End Balance',fmtCF(endBal),'Cumulative',endBal>=0?'var(--ac)':'var(--rd)',90);
+    h+=kpi('\u25CF','Burn/mo',fmtCF(avgBurn),'Average','var(--am)',120);
+    h+=kpi('\u231A','Runway',avgBurn>0?(Math.abs(endBal)/avgBurn).toFixed(1)+' mo':'\u221e','Months left','var(--cy)',150);
+    h+='</div>';
+    
+    h+='<div class="cg cg2" style="margin-bottom:16px">';
+    h+='<div class="cc"><div class="cc-t">Cash In vs Out</div><div style="height:260px"><canvas id="chCFr1"></canvas></div></div>';
+    h+='<div class="cc"><div class="cc-t">Cumulative Cash</div><div style="height:260px"><canvas id="chCFr2"></canvas></div></div>';
+    h+='</div>';
+    
+    // Monthly table
+    h+='<div class="cc"><div class="cc-t">Monthly Detail</div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left">Month</th><th style="text-align:right;color:var(--gn)">Cash In</th><th style="text-align:right;color:var(--rd)">Cash Out</th><th style="text-align:right">Net</th><th style="text-align:right">Cumulative</th></tr></thead><tbody>';
+    months.forEach(function(m,i){
+      var net=m.cashIn-m.cashOut;
+      h+='<tr><td style="font-weight:600">'+labels[i]+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--gn)">'+fmtCF(m.cashIn)+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--rd)">'+fmtCF(m.cashOut)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700;color:'+(net>=0?'var(--gn)':'var(--rd)')+'">'+fmtCF(net)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700">'+fmtCF(m.cumCash)+'</td></tr>';
+    });
+    h+='</tbody></table></div></div>';
+    
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Non-2026 data based on P&L entries (P&L \u2248 CF)</div>';
+    
+    el.innerHTML=h;
+    
+    document.getElementById('cfFrom').addEventListener('change',function(){cfFrom=parseRange(this.value);renderCashFlow(el)});
+    document.getElementById('cfTo').addEventListener('change',function(){cfTo=parseRange(this.value);renderCashFlow(el)});
+    document.querySelectorAll('.cf-cur').forEach(function(btn){
+      btn.addEventListener('click',function(){cfCurrency=this.dataset.cur;renderCashFlow(el)});
+    });
+    
+    mk('chCFr1',{type:'bar',data:{labels:labels,datasets:[
+      {label:'Cash In',data:months.map(function(m){return toCF(m.cashIn)}),backgroundColor:'#10b981aa',borderRadius:4},
+      {label:'Cash Out',data:months.map(function(m){return-toCF(m.cashOut)}),backgroundColor:'#ef444488',borderRadius:4}
+    ]}});
+    mk('chCFr2',{type:'line',data:{labels:labels,datasets:[
+      {label:'Cumulative',data:months.map(function(m){return toCF(m.cumCash)}),borderColor:'#3b82f6',borderWidth:3,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',tension:.4,fill:{target:'origin',above:'rgba(59,130,246,0.1)',below:'rgba(239,68,68,0.1)'}}
+    ]}});
+  });
+  return;
+}
+function renderCashFlow2026(el){
   el.innerHTML='<div style="padding:40px;text-align:center;color:var(--txM)">Loading...</div>';
   authFetch('/api/cashflow-report?currency='+cfCurrency).then(function(r){return r.json()}).then(function(data){
     var months=data.months;var rate=data.exchangeRate;
@@ -2918,8 +3017,9 @@ function renderCashFlow(el){
       {label:'Loans',data:months.map(function(m){return m.loanExpenses||0}),backgroundColor:'#ef444488',borderRadius:4}
     ]},options:{scales:{y:{stacked:true},x:{stacked:true}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
 
-    // Year + Currency toggle
-    document.getElementById('cfYearSel').addEventListener('change',function(){cfYear=parseInt(this.value);renderCashFlow(el)});
+    // Range + Currency toggle
+    document.getElementById('cfFrom').addEventListener('change',function(){cfFrom=parseRange(this.value);renderCashFlow(el)});
+    document.getElementById('cfTo').addEventListener('change',function(){cfTo=parseRange(this.value);renderCashFlow(el)});
     document.querySelectorAll('.cf-cur').forEach(function(btn){
       btn.addEventListener('click',function(){cfCurrency=this.dataset.cur;renderCashFlow(el)});
     });
@@ -3105,14 +3205,12 @@ function renderCashFlowManual(el){
     var endBal=cumCash[11];
     var avgBurn=totalExp/12;
     
-    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">';
     h+='<h2 style="margin:0">Cash Flow Report</h2>';
-    h+='<div style="display:flex;gap:6px;align-items:center">';
-    h+='<select id="cfYearSel" style="padding:6px 12px;font-size:13px;font-weight:700;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px">';
-    for(var y=2025;y<=2027;y++) h+='<option value="'+y+'"'+(y===cfYear?' selected':'')+'>FY '+y+'</option>';
-    h+='</select>';
-    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$ USD</button>';
-    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">\u20AA ILS</button>';
+    h+='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+    h+=buildRangePicker('cf',cfFrom,cfTo);
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:5px 12px;font-size:11px;'+(cfCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$</button>';
+    h+='<button class="btn-ghost cf-cur'+(cfCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:5px 12px;font-size:11px;'+(cfCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">\u20AA</button>';
     h+='</div></div>';
     
     h+='<div class="kg" style="grid-template-columns:repeat(6,1fr);margin-bottom:16px">';
