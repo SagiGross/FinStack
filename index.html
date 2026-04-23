@@ -961,9 +961,13 @@ function renderBalanceSheet(){
   row('Total Liabilities',totalLiab,'color:var(--rd)',true);
 
   h+='<tr><td colspan="13" style="font-size:10px;color:var(--ac);padding:10px 0 2px;font-weight:700">EQUITY</td></tr>';
-  var equity=d.map(function(m,i){return totalAssets[i]-totalLiab[i]});
-  row('  Retained Earnings',equity);
-  row('Total Equity',equity,'color:var(--ac)',true);
+  var cumInvestment=0;
+  var investedCapital=d.map(function(m){cumInvestment+=(m.investmentIn||0);return cumInvestment});
+  var totalEquity=d.map(function(m,i){return totalAssets[i]-totalLiab[i]});
+  var retained=d.map(function(m,i){return totalEquity[i]-investedCapital[i]});
+  if(investedCapital.some(function(v){return v>0})) row('  Invested Capital',investedCapital,'color:var(--ac)');
+  row('  Retained Earnings',retained);
+  row('Total Equity',totalEquity,'color:var(--ac)',true);
 
   h+='<tr style="border-top:3px double var(--bd)"><td style="font-weight:900;font-size:13px">Liabilities + Equity</td>';
   d.forEach(function(m,i){h+='<td class="mono" style="text-align:right;font-weight:800;font-size:12px">'+finFmt(totalLiab[i]+equity[i])+'</td>'});
@@ -1083,7 +1087,7 @@ function renderFinancial(){
   var tc=d.reduce(function(s,m){return s+m.cogs},0);
   var tgp=d.reduce(function(s,m){return s+m.grossProfit},0);
   var tn=d.reduce(function(s,m){return s+m.netIncome},0);
-  var ab=d.reduce(function(s,m){return s+m.totalExp},0)/12;
+  var ab=d.reduce(function(s,m){return s+(m.burnGross||0)},0)/12;
   var ag=tr>0?tgp/tr*100:0;
   var last=d[d.length-1];
   var h='<div class="kg kg6">';
@@ -2444,56 +2448,85 @@ function renderCashFlow(el){
     // KPIs
     var totalRev=months.reduce(function(s,m){return s+m.revenue},0);
     var totalExp=months.reduce(function(s,m){return s+m.totalExpenses},0);
+    var totalPayroll=months.reduce(function(s,m){return s+(m.laborCost||0)},0);
+    var totalVendors=months.reduce(function(s,m){return s+(m.vendorExpenses||0)},0);
+    var totalLoans=months.reduce(function(s,m){return s+(m.loanExpenses||0)},0);
     var endBal=months[months.length-1].closingBalance;
     var netTotal=totalRev-totalExp;
 
     var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
-    h+='<h2 style="margin:0">Cash Flow Report FY2026 \u2022 Click row to drill down</h2>';
+    h+='<h2 style="margin:0">Cash Flow Report FY2026</h2>';
     h+='<div style="display:flex;gap:6px">';
     h+='<button class="btn-ghost cf-cur'+(cfCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$ USD</button>';
     h+='<button class="btn-ghost cf-cur'+(cfCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:6px 14px;font-size:11px;'+(cfCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">₪ ILS</button>';
-    h+='<button class="btn-ghost" id="cfUpload" style="padding:6px 14px;font-size:11px">\u2191 Upload Bank Statement</button>';
     h+='</div></div>';
 
-    h+='<div class="kg kg4" style="margin-bottom:16px">';
-    h+=kpi('\u2197','Total Revenue',fmtCF(totalRev),'FY2026','var(--gn)');
-    h+=kpi('\u2198','Total Expenses',fmtCF(totalExp),'FY2026','var(--rd)',50);
-    h+=kpi('\u2248','Net Cashflow',fmtCF(netTotal),'FY2026',netTotal>=0?'var(--gn)':'var(--rd)',100);
-    h+=kpi('\u2587','End Balance',fmtCF(endBal),'Dec 2026',endBal>=0?'var(--ac)':'var(--rd)',150);
+    // Row 1: Main KPIs
+    h+='<div class="kg" style="grid-template-columns:repeat(6,1fr);margin-bottom:16px">';
+    h+=kpi('\u2197','Cash In',fmtCF(totalRev),'Revenue + Investments','var(--gn)');
+    h+=kpi('\u2198','Cash Out',fmtCF(totalExp),'Payroll + Vendors + Loans','var(--rd)',30);
+    h+=kpi('\u2248','Net Cashflow',fmtCF(netTotal),'FY2026',netTotal>=0?'var(--gn)':'var(--rd)',60);
+    h+=kpi('\u2587','End Balance',fmtCF(endBal),'Dec 2026',endBal>=0?'var(--ac)':'var(--rd)',90);
+    h+=kpi('\u25CF','Payroll',fmtCF(totalPayroll),'Annual','var(--am)',120);
+    h+=kpi('\u25A0','Vendors',fmtCF(totalVendors),'Annual','var(--pu)',150);
     h+='</div>';
 
-    // Chart
-    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Monthly Cash Flow</div><div style="height:260px"><canvas id="chCF"></canvas></div></div>';
+    // Charts row
+    h+='<div class="cg cg2" style="margin-bottom:16px">';
+    h+='<div class="cc"><div class="cc-t">Monthly Cash In vs Cash Out</div><div style="height:260px"><canvas id="chCF"></canvas></div></div>';
+    h+='<div class="cc"><div class="cc-t">Cash Out Breakdown</div><div style="height:260px"><canvas id="chCFBreak"></canvas></div></div>';
+    h+='</div>';
 
+    // Quarterly Summary
+    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Quarterly Summary</div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px;table-layout:fixed"><thead><tr><th style="text-align:left;width:20%"></th><th style="text-align:right;width:16%">Q1</th><th style="text-align:right;width:16%">Q2</th><th style="text-align:right;width:16%">Q3</th><th style="text-align:right;width:16%">Q4</th><th style="text-align:right;width:16%;font-weight:800">FY</th></tr></thead><tbody>';
+    var qtr=[[0,1,2],[3,4,5],[6,7,8],[9,10,11]];
+    function qSumCF(field){return qtr.map(function(q){return q.reduce(function(s,i){return s+(months[i]?months[i][field]||0:0)},0)})}
+    function qRowCF(label,vals,style){
+      var total=vals.reduce(function(a,b){return a+b},0);
+      h+='<tr style="'+(style||'')+'"><td style="font-weight:600">'+label+'</td>';
+      vals.forEach(function(v){h+='<td class="mono" style="text-align:right;'+(v<0?'color:var(--rd)':'')+'">'+fmtCF(v)+'</td>'});
+      h+='<td class="mono" style="text-align:right;font-weight:800;'+(total<0?'color:var(--rd)':'')+'">'+fmtCF(total)+'</td></tr>';
+    }
+    qRowCF('Cash In',qSumCF('revenue'),'color:var(--gn)');
+    qRowCF('Payroll',qSumCF('laborCost'),'color:var(--am)');
+    qRowCF('Vendors',qSumCF('vendorExpenses'),'color:var(--pu)');
+    qRowCF('Loans',qSumCF('loanExpenses'));
+    qRowCF('Total Out',qSumCF('totalExpenses'),'color:var(--rd)');
+    qRowCF('Net',qtr.map(function(q){return q.reduce(function(s,i){return s+(months[i]?months[i].netCashflow||0:0)},0)}),'font-weight:700;border-top:1px solid var(--bd)');
+    var qClose=qtr.map(function(q){return months[q[q.length-1]]?months[q[q.length-1]].closingBalance:0});
+    qRowCF('End Balance',qClose,'font-weight:700;border-top:1px solid var(--bd)');
+    h+='</tbody></table></div></div>';
+
+    // Monthly Table — collapsible
     var bankGroups=data.bankGroups||[];
     var bankLabels={};
     (data.paymentMethods||[]).forEach(function(pm){if(pm.bankGroup)bankLabels[pm.bankGroup]=pm.bankGroup.charAt(0).toUpperCase()+pm.bankGroup.slice(1)});
 
-    // Table
-    h+='<div style="overflow-x:auto"><table style="width:100%;min-width:900px"><thead><tr style="font-size:11px">';
-    h+='<th>Month</th><th>Opening</th><th style="color:var(--gn)">Revenue</th><th style="color:var(--am)">Payroll</th><th style="color:var(--pu)">Vendors</th><th style="color:var(--rd)">Total Exp.</th><th>Net</th><th>Closing</th><th></th>';
+    h+='<div class="cc"><div class="cc-t" style="display:flex;justify-content:space-between;align-items:center">Monthly Detail <button class="btn-ghost" id="cfToggleTable" style="padding:4px 12px;font-size:10px">\u25BC Expand</button></div>';
+    h+='<div id="cfMonthlyTable" style="display:none;overflow-x:auto"><table style="width:100%;min-width:900px"><thead><tr style="font-size:11px">';
+    h+='<th>Month</th><th>Opening</th><th style="color:var(--gn)">Cash In</th><th style="color:var(--am)">Payroll</th><th style="color:var(--pu)">Vendors</th><th>Loans</th><th style="color:var(--rd)">Total Out</th><th>Net</th><th>Closing</th>';
     h+='</tr></thead><tbody id="cfTbl">';
 
     months.forEach(function(m,mi){
       var payrollTotal=(m.cfGross||0)+(m.cfSS||0)+(m.cfDisability||0)+(m.cfPension||0)+(m.cfStudyFund||0)+(m.cfTax||0);
-      var payrollTip='Gross: '+fmtCF(m.cfGross||0)+'\nSS+Disability: '+fmtCF((m.cfSS||0)+(m.cfDisability||0))+' (prev mo)\nPension: '+fmtCF(m.cfPension||0)+' (prev mo)\nStudy Fund: '+fmtCF(m.cfStudyFund||0)+' (prev mo)\nTax: '+fmtCF(m.cfTax||0);
       h+='<tr class="clickrow cf-row" data-mi="'+mi+'" style="cursor:pointer">';
       h+='<td style="font-weight:700">'+m.monthLabel+' <span style="font-size:9px;color:var(--txM)">\u25B6</span></td>';
-      h+='<td class="mono cf-bal-cell" data-month="'+m.month+'" data-field="opening" style="cursor:pointer;'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.openingBalance)+(m.isManual?' \u270E':'')+'</td>';
+      h+='<td class="mono" style="'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.openingBalance)+'</td>';
       h+='<td class="mono" style="color:var(--gn)">'+fmtCF(m.revenue)+'</td>';
-      h+='<td class="mono cf-tax-cell" data-month="'+m.month+'" data-mi="'+mi+'" style="cursor:pointer;color:var(--am)" title="'+payrollTip+'">'+fmtCF(payrollTotal)+' \u270E</td>';
+      h+='<td class="mono" style="color:var(--am)">'+fmtCF(m.laborCost||0)+'</td>';
       h+='<td class="mono" style="color:var(--pu)">'+fmtCF(m.vendorExpenses)+'</td>';
+      h+='<td class="mono">'+fmtCF(m.loanExpenses||0)+'</td>';
       h+='<td class="mono" style="color:var(--rd);font-weight:700">'+fmtCF(m.totalExpenses)+'</td>';
       h+='<td class="mono" style="font-weight:700;color:'+(m.netCashflow>=0?'var(--gn)':'var(--rd)')+'">'+fmtCF(m.netCashflow)+'</td>';
-      h+='<td class="mono cf-bal-cell" data-month="'+m.month+'" data-field="closing" style="cursor:pointer;font-weight:700;'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.closingBalance)+(m.isManual?' \u270E':'')+'</td>';
-      h+='<td>'+(m.notes?'<span title="'+m.notes+'" style="cursor:help;color:var(--txM)">✎</span>':'')+'</td>';
+      h+='<td class="mono" style="font-weight:700;'+(m.isManual?'color:var(--cy)':'')+'">'+fmtCF(m.closingBalance)+'</td>';
       h+='</tr>';
       // Hidden drill-down row
       h+='<tr class="cf-detail" data-mi="'+mi+'" style="display:none"><td colspan="9" style="padding:0;background:var(--cardH)">';
       h+='<div style="padding:12px 16px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px">';
       // Revenue breakdown
       h+='<div style="flex:1;min-width:180px"><div style="font-weight:700;color:var(--gn);margin-bottom:6px">\u2197 Revenue: '+fmtCF(m.revenue)+'</div>';
-      h+='<div style="color:var(--txD)">Cash receipts from contracts (DSO-adjusted)</div></div>';
+      h+='<div style="color:var(--txD)">Cash receipts from invoices</div></div>';
       // Payroll breakdown
       h+='<div style="flex:1;min-width:200px"><div style="font-weight:700;color:var(--am);margin-bottom:6px">★ Payroll: '+fmtCF((m.cfGross||0)+(m.cfSS||0)+(m.cfDisability||0)+(m.cfPension||0)+(m.cfStudyFund||0)+(m.cfTax||0))+'</div>';
       h+='<div style="display:flex;flex-direction:column;gap:2px">';
@@ -2526,16 +2559,29 @@ function renderCashFlow(el){
       h+='</div></td></tr>';
     });
     h+='</tbody></table></div>';
-    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Click row to expand. Hover Payroll for breakdown. Click \u270E to edit tax. Rate: $1 = \u20AA'+rate.toFixed(2)+'</div>';
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Click row to expand details. Rate: $1 = \u20AA'+rate.toFixed(2)+'</div>';
+    h+='</div>';
 
     el.innerHTML=h;
 
-    // Chart
+    // Toggle monthly table
+    document.getElementById('cfToggleTable').addEventListener('click',function(){
+      var tbl=document.getElementById('cfMonthlyTable');
+      if(tbl.style.display==='none'){tbl.style.display='block';this.textContent='\u25B2 Collapse'}
+      else{tbl.style.display='none';this.textContent='\u25BC Expand'}
+    });
+
+    // Charts
     mk('chCF',{type:'bar',data:{labels:months.map(function(m){return m.monthLabel}),datasets:[
-      {label:'Revenue',data:months.map(function(m){return m.revenue}),backgroundColor:'#10b981aa',borderRadius:4},
-      {label:'Expenses',data:months.map(function(m){return-m.totalExpenses}),backgroundColor:'#ef444488',borderRadius:4},
+      {label:'Cash In',data:months.map(function(m){return m.revenue}),backgroundColor:'#10b981aa',borderRadius:4},
+      {label:'Cash Out',data:months.map(function(m){return-m.totalExpenses}),backgroundColor:'#ef444488',borderRadius:4},
       {label:'Balance',data:months.map(function(m){return m.closingBalance}),type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',pointBorderWidth:2,tension:.4,order:0}
     ]}});
+    mk('chCFBreak',{type:'bar',data:{labels:months.map(function(m){return m.monthLabel}),datasets:[
+      {label:'Payroll',data:months.map(function(m){return m.laborCost||0}),backgroundColor:'#f59e0b88',borderRadius:4},
+      {label:'Vendors',data:months.map(function(m){return m.vendorExpenses||0}),backgroundColor:'#8b5cf688',borderRadius:4},
+      {label:'Loans',data:months.map(function(m){return m.loanExpenses||0}),backgroundColor:'#ef444488',borderRadius:4}
+    ]},options:{scales:{y:{stacked:true},x:{stacked:true}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
 
     // Currency toggle
     document.querySelectorAll('.cf-cur').forEach(function(btn){
@@ -3284,10 +3330,10 @@ function openInvoiceCard(inv){
 }
 
 function renderSettings(el){
-  var h='<div class="subtabs" id="setTabs"><button class="stab act" data-st="scon">Contracts</button><button class="stab" data-st="semp">Employees</button><button class="stab" data-st="sexp">Expenses</button><button class="stab" data-st="sinc">Income</button><button class="stab" data-st="sloans">Loans</button></div>';
-  h+='<div class="stab-content act" id="st-scon"></div><div class="stab-content" id="st-semp"></div><div class="stab-content" id="st-sexp"></div><div class="stab-content" id="st-sinc"></div><div class="stab-content" id="st-sloans"></div>';
+  var h='<div class="subtabs" id="setTabs"><button class="stab act" data-st="scon">Contracts</button><button class="stab" data-st="semp">Employees</button><button class="stab" data-st="sexp">Expenses</button><button class="stab" data-st="sinc">Income</button><button class="stab" data-st="sloans">Loans</button><button class="stab" data-st="sinvest">Investments</button></div>';
+  h+='<div class="stab-content act" id="st-scon"></div><div class="stab-content" id="st-semp"></div><div class="stab-content" id="st-sexp"></div><div class="stab-content" id="st-sinc"></div><div class="stab-content" id="st-sloans"></div><div class="stab-content" id="st-sinvest"></div>';
   el.innerHTML=h;
-  document.getElementById('setTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;el.querySelectorAll('.stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='sloans')renderLoansTab();if(b.dataset.st==='sinc')renderIncomeTab()});
+  document.getElementById('setTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;el.querySelectorAll('.stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='sloans')renderLoansTab();if(b.dataset.st==='sinc')renderIncomeTab();if(b.dataset.st==='sinvest')renderInvestmentsTab()});
   makeDraggableTabs(document.getElementById('setTabs'),'detail_tabs');
   // Contract form
   var spOpts='<option value="">-- None --</option>';(D.salespeople||[]).forEach(function(sp){spOpts+='<option value="'+sp.id+'">'+sp.name+'</option>'});
@@ -3956,34 +4002,47 @@ function renderLoansTab(){
     h+=' <span style="font-size:11px;color:var(--txM)">(set per loan in Edit)</span></div></div>';
 
     h+='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Loans <button class="btn-p" id="btnAddLoan" style="padding:6px 14px;font-size:11px">+ Add Loan</button></div>';
-    h+='<div style="overflow-x:auto"><table><thead><tr><th>Lender</th><th>Amount</th><th>OB</th><th>Rate</th><th>Term</th><th>Type</th><th>Start</th><th>Total Interest</th><th>Total Payment</th><th></th></tr></thead><tbody>';
-    if(loans.length===0) h+='<tr><td colspan="10" style="text-align:center;color:var(--txM);padding:20px">No loans</td></tr>';
-    loans.forEach(function(ln){
-      var sym=ln.currency==='ILS'?'\u20AA':'$';
-      h+='<tr class="clickrow loan-row" data-lid="'+ln.id+'" style="cursor:pointer">';
-      h+='<td style="font-weight:600">'+ln.lender+'</td>';
-      h+='<td class="mono">'+sym+Math.round(ln.amount).toLocaleString()+'</td>';
-      h+='<td class="mono" style="color:var(--am)">'+(ln.openingBalance?sym+Math.round(ln.openingBalance).toLocaleString():'\u2014')+'</td>';
-      h+='<td class="mono">'+ln.annualRate+'%</td>';
-      h+='<td class="mono">'+ln.termMonths+' mo</td>';
-      h+='<td style="font-size:11px">'+(repLabels[ln.repaymentType]||ln.repaymentType)+'</td>';
-      h+='<td style="font-size:11px;color:var(--txD)">'+ln.startDate+'</td>';
-      h+='<td class="mono" style="color:var(--am)">'+sym+Math.round(ln.totalInterest).toLocaleString()+'</td>';
-      h+='<td class="mono" style="font-weight:700">'+sym+Math.round(ln.totalPayment).toLocaleString()+'</td>';
-      h+='<td><button class="btn-ghost loan-edit" data-lid="'+ln.id+'" style="padding:3px 8px;font-size:10px;color:var(--ac)">\u270E</button> <button class="btn-ghost loan-del" data-lid="'+ln.id+'" style="padding:3px 8px;font-size:10px;color:var(--rd)">\u2715</button></td>';
-      h+='</tr>';
-      // Expandable schedule
-      h+='<tr class="loan-sched" data-lid="'+ln.id+'" style="display:none"><td colspan="9" style="padding:0;background:var(--cardH)">';
-      h+='<div style="padding:12px 16px;overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr><th>#</th><th>Date</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Remaining</th></tr></thead><tbody>';
-      ln.schedule.forEach(function(s){
-        h+='<tr><td>'+s.month+'</td><td>'+s.date+'</td><td class="mono">'+sym+Math.round(s.payment).toLocaleString()+'</td>';
-        h+='<td class="mono" style="color:var(--ac)">'+sym+Math.round(s.principal).toLocaleString()+'</td>';
-        h+='<td class="mono" style="color:var(--am)">'+sym+Math.round(s.interest).toLocaleString()+'</td>';
-        h+='<td class="mono">'+sym+Math.round(s.remaining).toLocaleString()+'</td></tr>';
+    
+    var bankLoans=loans.filter(function(ln){return(ln.loanType||'bank')==='bank'});
+    var nonBankLoans=loans.filter(function(ln){return ln.loanType==='non_bank'});
+    var ownerLoans=loans.filter(function(ln){return ln.loanType==='owner'});
+    
+    function renderLoanTable(title,loanList){
+      h+='<div style="padding:6px 14px;font-size:11px;font-weight:700;color:var(--txM);background:var(--cardH)">'+title+'</div>';
+      h+='<div style="overflow-x:auto"><table><thead><tr><th>Lender</th><th>Amount</th><th>OB</th><th>Rate</th><th>Term</th><th>Type</th><th>Start</th><th>Paid</th><th></th></tr></thead><tbody>';
+      if(loanList.length===0) h+='<tr><td colspan="9" style="text-align:center;color:var(--txM);padding:12px">None</td></tr>';
+      loanList.forEach(function(ln){
+        var sym=ln.currency==='ILS'?'\u20AA':'$';
+        var totalPaid=ln.manualPayments?ln.manualPayments.reduce(function(s,p){return s+p.amount},0):0;
+        h+='<tr class="clickrow loan-row" data-lid="'+ln.id+'" style="cursor:pointer">';
+        h+='<td style="font-weight:600">'+ln.lender+'</td>';
+        h+='<td class="mono">'+sym+Math.round(ln.amount).toLocaleString()+'</td>';
+        h+='<td class="mono" style="color:var(--am)">'+(ln.openingBalance?sym+Math.round(ln.openingBalance).toLocaleString():'\u2014')+'</td>';
+        h+='<td class="mono">'+ln.annualRate+'%</td>';
+        h+='<td class="mono">'+ln.termMonths+' mo</td>';
+        h+='<td style="font-size:11px">'+(repLabels[ln.repaymentType]||ln.repaymentType)+'</td>';
+        h+='<td style="font-size:11px;color:var(--txD)">'+ln.startDate+'</td>';
+        h+='<td class="mono" style="color:var(--gn)">'+(totalPaid>0?sym+Math.round(totalPaid).toLocaleString():'\u2014')+'</td>';
+        h+='<td><button class="btn-ghost loan-edit" data-lid="'+ln.id+'" style="padding:3px 8px;font-size:10px;color:var(--ac)">\u270E</button> <button class="btn-ghost loan-del" data-lid="'+ln.id+'" style="padding:3px 8px;font-size:10px;color:var(--rd)">\u2715</button></td>';
+        h+='</tr>';
+        // Schedule
+        h+='<tr class="loan-sched" data-lid="'+ln.id+'" style="display:none"><td colspan="9" style="padding:0;background:var(--cardH)">';
+        h+='<div style="padding:12px 16px;overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr><th>#</th><th>Date</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Remaining</th></tr></thead><tbody>';
+        ln.schedule.forEach(function(s){
+          h+='<tr><td>'+s.month+'</td><td>'+s.date+'</td><td class="mono">'+sym+Math.round(s.payment).toLocaleString()+'</td>';
+          h+='<td class="mono" style="color:var(--ac)">'+sym+Math.round(s.principal).toLocaleString()+'</td>';
+          h+='<td class="mono" style="color:var(--am)">'+sym+Math.round(s.interest).toLocaleString()+'</td>';
+          h+='<td class="mono">'+sym+Math.round(s.remaining).toLocaleString()+'</td></tr>';
+        });
+        h+='</tbody></table></div></td></tr>';
       });
-      h+='</tbody></table></div></td></tr>';
-    });
-    h+='</tbody></table></div></div>';
+      h+='</tbody></table></div>';
+    }
+    
+    renderLoanTable('Bank Loans',bankLoans);
+    renderLoanTable('Non-Bank Loans',nonBankLoans);
+    renderLoanTable('Owner Loans',ownerLoans);
+    h+='</div>';
     el.innerHTML=h;
 
     // Row click to expand schedule
@@ -4016,12 +4075,24 @@ function renderLoansTab(){
         eh+='</select></div>';
         eh+='<div class="mf"><label>Start Date</label><input id="eln-start" type="date" value="'+ln.startDate+'"></div>';
         eh+='<div class="mf"><label>Opening Balance (\u20AA)</label><input id="eln-ob" type="number" value="'+(ln.openingBalance||0)+'"><div class="hint">Prior year remaining balance</div></div>';
+        eh+='<div class="mf"><label>Loan Type</label><select id="eln-ltype"><option value="bank"'+(ln.loanType==='bank'||!ln.loanType?' selected':'')+'>Bank Loan</option><option value="non_bank"'+(ln.loanType==='non_bank'?' selected':'')+'>Non-Bank Loan</option><option value="owner"'+(ln.loanType==='owner'?' selected':'')+'>Owner Loan</option></select></div>';
         eh+='<div class="mf"><label>Notes</label><input id="eln-notes" value="'+(ln.notes||'')+'"></div>';
         var hasCustomInt=ln.interestStartMonth&&ln.interestStartMonth!=='';
         eh+='<div class="mf"><label>Interest Starts</label><div style="display:flex;align-items:center;gap:8px"><input id="eln-intstart-same" type="checkbox"'+(!hasCustomInt?' checked':'')+' style="width:16px;height:16px"><span style="font-size:12px">Same as loan start</span></div><select id="eln-intmonth" style="'+(hasCustomInt?'':'display:none;')+'margin-top:6px">';
         ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach(function(mn,mi){var mv=(mi+1<10?'0':'')+(mi+1)+'-2026';eh+='<option value="'+mv+'"'+(ln.interestStartMonth===mv?' selected':'')+'>'+mn+' 2026</option>'});
         eh+='</select></div>';
-        eh+='</div></div>';
+        eh+='</div>';
+        // Manual payments section
+        eh+='<div class="modal-sep"></div>';
+        eh+='<div class="section-label">Manual Payments</div>';
+        eh+='<div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">';
+        eh+='<div class="mf" style="margin:0;flex:1;min-width:100px"><label>Amount</label><input id="eln-payamt" type="number" placeholder="0"></div>';
+        eh+='<div class="mf" style="margin:0;min-width:130px"><label>Payment Date</label><input id="eln-paydate" type="date"></div>';
+        eh+='<div class="mf" style="margin:0;min-width:100px"><label>Notes</label><input id="eln-paynotes" placeholder="Optional"></div>';
+        eh+='<button class="btn-p" id="eln-addpay" style="padding:8px 14px;font-size:11px;margin-bottom:2px">Add Payment</button>';
+        eh+='</div>';
+        eh+='<div id="eln-paylist" style="font-size:11px;color:var(--txM)">Loading...</div>';
+        eh+='</div>';
         eh+='<div class="modal-foot"><button class="btn-ghost" id="elnX">Cancel</button><button class="btn-p" id="elnSave">Save</button></div></div></div>';
         document.body.insertAdjacentHTML('beforeend',eh);
         document.getElementById('modalClose').addEventListener('click',closeModal);
@@ -4030,6 +4101,45 @@ function renderLoansTab(){
         document.getElementById('eln-intstart-same').addEventListener('change',function(){
           document.getElementById('eln-intmonth').style.display=this.checked?'none':'block';
         });
+        
+        // Load manual payments
+        function loadLoanPayments(){
+          authFetch('/api/loan-payments/'+lid).then(function(r){return r.json()}).then(function(pays){
+            var pl=document.getElementById('eln-paylist');if(!pl)return;
+            if(!pays||!pays.length){pl.innerHTML='No manual payments yet.';return}
+            var sym=ln.currency==='ILS'?'\u20AA':'$';
+            var ph='<table style="width:100%;font-size:11px"><thead><tr><th>Amount</th><th>Date</th><th>Notes</th><th></th></tr></thead><tbody>';
+            var totalP=0;
+            pays.forEach(function(p){
+              totalP+=p.amount;
+              ph+='<tr><td class="mono" style="font-weight:600">'+sym+Math.round(p.amount).toLocaleString()+'</td>';
+              ph+='<td style="color:var(--gn)">'+p.paymentDate+'</td>';
+              ph+='<td style="color:var(--txM)">'+(p.notes||'\u2014')+'</td>';
+              ph+='<td><button class="btn-ghost lpay-del" data-lpid="'+p.id+'" style="padding:2px 6px;font-size:9px;color:var(--rd)">\u2715</button></td></tr>';
+            });
+            ph+='<tr style="border-top:2px solid var(--bd);font-weight:700"><td class="mono">'+sym+Math.round(totalP).toLocaleString()+'</td><td colspan="3" style="color:var(--txM)">'+pays.length+' payment'+(pays.length>1?'s':'')+'</td></tr>';
+            ph+='</tbody></table>';
+            pl.innerHTML=ph;
+            pl.querySelectorAll('.lpay-del').forEach(function(btn){
+              btn.addEventListener('click',function(){
+                authFetch('/api/loan-payment/'+this.dataset.lpid,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok)loadLoanPayments()});
+              });
+            });
+          }).catch(function(){});
+        }
+        loadLoanPayments();
+        
+        document.getElementById('eln-addpay').addEventListener('click',function(){
+          var amt=parseFloat(document.getElementById('eln-payamt').value);
+          var pd=document.getElementById('eln-paydate').value;
+          if(!amt||!pd){toast('Enter amount and date');return}
+          authFetch('/api/loan-payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            loanId:lid,amount:amt,paymentDate:pd,notes:document.getElementById('eln-paynotes').value||''
+          })}).then(function(r){return r.json()}).then(function(res){
+            if(res.ok){toast('Payment added');document.getElementById('eln-payamt').value='';document.getElementById('eln-paydate').value='';document.getElementById('eln-paynotes').value='';loadLoanPayments()}
+          });
+        });
+        
         document.getElementById('elnSave').addEventListener('click',function(){
           var intStart=document.getElementById('eln-intstart-same').checked?'':document.getElementById('eln-intmonth').value;
           authFetch('/api/loans/'+lid,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
@@ -4042,7 +4152,8 @@ function renderLoansTab(){
             currency:document.getElementById('eln-cur').value,
             notes:document.getElementById('eln-notes').value,
             interestStartMonth:intStart,
-            openingBalance:parseFloat(document.getElementById('eln-ob').value)||0
+            openingBalance:parseFloat(document.getElementById('eln-ob').value)||0,
+            loanType:document.getElementById('eln-ltype').value
           })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Loan updated');loadAll().then(function(){renderLoansTab()})}});
         });
       });
@@ -4075,6 +4186,7 @@ function renderLoansTab(){
       ah+='<div class="mf"><label>Repayment Type</label><select id="ln-type"><option value="principal_interest">Principal + Interest</option><option value="interest_only">Interest Only</option><option value="principal_only">Principal Only</option><option value="balloon">Balloon / Grace</option></select></div>';
       ah+='<div class="mf"><label>Start Date *</label><input id="ln-start" type="date" value="2026-01-01"></div>';
       ah+='<div class="mf"><label>Opening Balance (\u20AA)</label><input id="ln-ob" type="number" value="0"><div class="hint">Prior year remaining balance</div></div>';
+      ah+='<div class="mf"><label>Loan Type</label><select id="ln-ltype"><option value="bank">Bank Loan</option><option value="non_bank">Non-Bank Loan</option><option value="owner">Owner Loan</option></select></div>';
       ah+='<div class="mf"><label>Notes</label><input id="ln-notes" placeholder="Optional"></div>';
       ah+='<div class="mf"><label>Interest Starts</label><div style="display:flex;align-items:center;gap:8px"><input id="ln-intstart-same" type="checkbox" checked style="width:16px;height:16px"><span style="font-size:12px">Same as loan start</span></div><select id="ln-intmonth" style="display:none;margin-top:6px">';
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach(function(mn,mi){ah+='<option value="'+(mi+1<10?'0':'')+(mi+1)+'-2026">'+mn+' 2026</option>'});
@@ -4102,8 +4214,110 @@ function renderLoansTab(){
           currency:document.getElementById('ln-cur').value,
           notes:document.getElementById('ln-notes').value,
           interestStartMonth:intStart,
-          openingBalance:parseFloat(document.getElementById('ln-ob').value)||0
+          openingBalance:parseFloat(document.getElementById('ln-ob').value)||0,
+          loanType:document.getElementById('ln-ltype').value
         })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Loan added');loadAll().then(function(){renderLoansTab()})}});
+      });
+    });
+  });
+}
+
+function renderInvestmentsTab(){
+  var el=document.getElementById('st-sinvest');if(!el)return;
+  el.innerHTML='<div style="padding:20px;text-align:center;color:var(--txM)">Loading...</div>';
+  authFetch('/api/investments').then(function(r){return r.json()}).then(function(investments){
+    var typeLabels={equity:'Equity',convertible:'Convertible Note',safe:'SAFE',grant:'Grant'};
+    var totalAmt=investments.reduce(function(s,inv){return s+inv.amount},0);
+    var ih='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Investments <button class="btn-p" id="btnAddInvest" style="padding:6px 14px;font-size:11px">+ Add Investment</button></div>';
+    if(totalAmt>0) ih+='<div style="padding:6px 14px;font-size:12px;color:var(--txM)">Total Invested: <span class="mono" style="font-weight:700;color:var(--ac)">\u20AA'+Math.round(totalAmt).toLocaleString()+'</span></div>';
+    ih+='<div style="overflow-x:auto"><table><thead><tr><th>Investor</th><th>Amount</th><th>Type</th><th>Date</th><th>Payment</th><th>Notes</th><th></th></tr></thead><tbody>';
+    if(investments.length===0) ih+='<tr><td colspan="7" style="text-align:center;color:var(--txM);padding:20px">No investments yet</td></tr>';
+    investments.forEach(function(inv){
+      var sym=inv.currency==='ILS'?'\u20AA':inv.currency==='EUR'?'\u20AC':'$';
+      ih+='<tr>';
+      ih+='<td style="font-weight:600">'+inv.investor+'</td>';
+      ih+='<td class="mono" style="color:var(--ac)">'+sym+Math.round(inv.amount).toLocaleString()+'</td>';
+      ih+='<td style="font-size:11px">'+(typeLabels[inv.investmentType]||inv.investmentType)+'</td>';
+      ih+='<td style="font-size:11px;color:var(--txD)">'+inv.investmentDate+'</td>';
+      ih+='<td style="font-size:11px;color:var(--gn)">'+(inv.paymentDate||'same')+'</td>';
+      ih+='<td style="font-size:11px;color:var(--txM)">'+(inv.notes||'\u2014')+'</td>';
+      ih+='<td><button class="btn-ghost inv-edit" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--ac)">\u270E</button> <button class="btn-ghost inv-del2" data-iid="'+inv.id+'" style="padding:3px 8px;font-size:10px;color:var(--rd)">\u2715</button></td>';
+      ih+='</tr>';
+    });
+    ih+='</tbody></table></div></div>';
+    el.innerHTML=ih;
+    
+    // Delete
+    el.querySelectorAll('.inv-del2').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        if(!confirm('Delete investment?'))return;
+        authFetch('/api/investments/'+this.dataset.iid,{method:'DELETE'}).then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Deleted');renderInvestmentsTab()}});
+      });
+    });
+    
+    // Edit
+    el.querySelectorAll('.inv-edit').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        var inv=investments.find(function(x){return x.id===btn.dataset.iid});if(!inv)return;
+        var eh='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+        eh+='<div class="modal-head"><h2>Edit Investment</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+        eh+='<div class="modal-body"><div class="modal-grid">';
+        eh+='<div class="mf"><label>Investor</label><input id="einv-name" value="'+inv.investor+'"></div>';
+        eh+='<div class="mf"><label>Amount</label><input id="einv-amt" type="number" value="'+inv.amount+'"></div>';
+        eh+='<div class="mf"><label>Currency</label><select id="einv-cur"><option value="ILS"'+(inv.currency==='ILS'?' selected':'')+'>\u20AA ILS</option><option value="USD"'+(inv.currency==='USD'?' selected':'')+'>$ USD</option><option value="EUR"'+(inv.currency==='EUR'?' selected':'')+'>\u20AC EUR</option></select></div>';
+        eh+='<div class="mf"><label>Type</label><select id="einv-type"><option value="equity"'+(inv.investmentType==='equity'?' selected':'')+'>Equity</option><option value="convertible"'+(inv.investmentType==='convertible'?' selected':'')+'>Convertible Note</option><option value="safe"'+(inv.investmentType==='safe'?' selected':'')+'>SAFE</option><option value="grant"'+(inv.investmentType==='grant'?' selected':'')+'>Grant</option></select></div>';
+        eh+='<div class="mf"><label>Investment Date</label><input id="einv-date" type="date" value="'+inv.investmentDate+'"></div>';
+        eh+='<div class="mf"><label>Payment Date (CF)</label><input id="einv-pay" type="date" value="'+(inv.paymentDate||'')+'"></div>';
+        eh+='<div class="mf"><label>Notes</label><input id="einv-notes" value="'+(inv.notes||'')+'"></div>';
+        eh+='</div></div>';
+        eh+='<div class="modal-foot"><button class="btn-ghost" id="einvX">Cancel</button><button class="btn-p" id="einvSave">Save</button></div></div></div>';
+        document.body.insertAdjacentHTML('beforeend',eh);
+        document.getElementById('modalClose').addEventListener('click',closeModal);
+        document.getElementById('einvX').addEventListener('click',closeModal);
+        document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+        document.getElementById('einvSave').addEventListener('click',function(){
+          authFetch('/api/investments/'+inv.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            investor:document.getElementById('einv-name').value,
+            amount:parseFloat(document.getElementById('einv-amt').value),
+            currency:document.getElementById('einv-cur').value,
+            investmentType:document.getElementById('einv-type').value,
+            investmentDate:document.getElementById('einv-date').value,
+            paymentDate:document.getElementById('einv-pay').value||'',
+            notes:document.getElementById('einv-notes').value
+          })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Updated');loadAll().then(function(){renderInvestmentsTab()})}});
+        });
+      });
+    });
+    
+    // Add
+    document.getElementById('btnAddInvest').addEventListener('click',function(){
+      var ah='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:480px">';
+      ah+='<div class="modal-head"><h2>Add Investment</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+      ah+='<div class="modal-body"><div class="modal-grid">';
+      ah+='<div class="mf"><label>Investor *</label><input id="ninv-name" placeholder="e.g. Investor Name"></div>';
+      ah+='<div class="mf"><label>Amount *</label><input id="ninv-amt" type="number" placeholder="500000"></div>';
+      ah+='<div class="mf"><label>Currency</label><select id="ninv-cur"><option value="ILS">\u20AA ILS</option><option value="USD">$ USD</option><option value="EUR">\u20AC EUR</option></select></div>';
+      ah+='<div class="mf"><label>Type</label><select id="ninv-type"><option value="equity">Equity</option><option value="convertible">Convertible Note</option><option value="safe">SAFE</option><option value="grant">Grant</option></select></div>';
+      ah+='<div class="mf"><label>Investment Date *</label><input id="ninv-date" type="date" value="2026-01-01"></div>';
+      ah+='<div class="mf"><label>Payment Date (CF)</label><input id="ninv-pay" type="date"><div class="hint">When money arrives. Empty = same as investment date</div></div>';
+      ah+='<div class="mf"><label>Notes</label><input id="ninv-notes" placeholder="Optional"></div>';
+      ah+='</div></div>';
+      ah+='<div class="modal-foot"><button class="btn-ghost" id="ninvX">Cancel</button><button class="btn-p" id="ninvSave">Add Investment</button></div></div></div>';
+      document.body.insertAdjacentHTML('beforeend',ah);
+      document.getElementById('modalClose').addEventListener('click',closeModal);
+      document.getElementById('ninvX').addEventListener('click',closeModal);
+      document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+      document.getElementById('ninvSave').addEventListener('click',function(){
+        var name=document.getElementById('ninv-name').value;
+        var amt=parseFloat(document.getElementById('ninv-amt').value);
+        var dt=document.getElementById('ninv-date').value;
+        if(!name||!amt||!dt){toast('Fill required fields');return}
+        authFetch('/api/investments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          investor:name,amount:amt,currency:document.getElementById('ninv-cur').value,
+          investmentType:document.getElementById('ninv-type').value,
+          investmentDate:dt,paymentDate:document.getElementById('ninv-pay').value||'',
+          notes:document.getElementById('ninv-notes').value
+        })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Investment added');loadAll().then(function(){renderInvestmentsTab()})}});
       });
     });
   });

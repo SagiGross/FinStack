@@ -187,6 +187,15 @@ def init_db():
             notes TEXT DEFAULT '',
             interest_start_month TEXT DEFAULT '',
             opening_balance REAL DEFAULT 0,
+            loan_type TEXT DEFAULT 'bank',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS loan_payments (
+            id TEXT PRIMARY KEY,
+            loan_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            payment_date TEXT NOT NULL,
+            notes TEXT DEFAULT '',
             created_at TEXT
         );
         CREATE TABLE IF NOT EXISTS cap_table (
@@ -217,6 +226,17 @@ def init_db():
             amount REAL DEFAULT 0,
             invoice_date TEXT DEFAULT '',
             payment_date TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS investments (
+            id TEXT PRIMARY KEY,
+            investor TEXT NOT NULL,
+            amount REAL NOT NULL,
+            currency TEXT DEFAULT 'ILS',
+            investment_date TEXT NOT NULL,
+            payment_date TEXT DEFAULT '',
+            investment_type TEXT DEFAULT 'equity',
             notes TEXT DEFAULT '',
             created_at TEXT
         );
@@ -431,6 +451,7 @@ def auto_migrate():
         ("contracts", "subject_to_vat", "INTEGER DEFAULT 0"),
         ("loans", "interest_start_month", "TEXT DEFAULT ''"),
         ("loans", "opening_balance", "REAL DEFAULT 0"),
+        ("loans", "loan_type", "TEXT DEFAULT 'bank'"),
         ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
@@ -884,6 +905,26 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
                 for entry in entries:
                     data[mi_pay]["cashIn"] += to_usd(entry["amt"], entry["cur"], pay_ml)
         except: pass
+    # ── Investments (equity) → Cash In + Balance Sheet Equity ──
+    investment_by_month = [0.0] * 12
+    try:
+        with get_db() as db:
+            inv_rows = db.execute("SELECT * FROM investments").fetchall()
+            for inv in inv_rows:
+                pay_str = inv["payment_date"] or inv["investment_date"]
+                if not pay_str: continue
+                try:
+                    pd6 = date.fromisoformat(pay_str)
+                    if pd6.year == FY and 1 <= pd6.month <= 12:
+                        mi6 = pd6.month - 1
+                        amt_usd = to_usd(inv["amount"], inv.get("currency","ILS"), ML[mi6])
+                        data[mi6]["cashIn"] += amt_usd
+                        investment_by_month[mi6] += amt_usd
+                except: pass
+    except: pass
+    for i in range(12):
+        data[i]["investmentIn"] = round(investment_by_month[i], 2)
+    
     # ── Loans: interest → P&L Finance, payments → Cash Flow ──
     loans = load_loans()
     for ln in loans:
@@ -975,7 +1016,7 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
     
     # ── Loan balances per month ──
     loan_bal_by_month = [0.0] * 12
-    # Sum per-loan opening balances (replaces global loan_opening_bal)
+    # Sum per-loan opening balances
     loan_remaining = sum(to_usd(ln.get("opening_balance", 0), ln.get("currency","ILS"), ML[0]) for ln in loans)
     # Build map of new loans by start month
     loan_additions = [0.0] * 12
@@ -985,11 +1026,28 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
             if lsd.year == FY and 1 <= lsd.month <= 12:
                 loan_additions[lsd.month - 1] += to_usd(ln["amount"], ln.get("currency","ILS"), ML[lsd.month-1])
         except: pass
-    # Calculate balance per month: add new loans, subtract principal repayments
+    # Load manual loan payments
+    manual_loan_payments = [0.0] * 12
+    try:
+        with get_db() as db:
+            lp_rows = db.execute("SELECT lp.*, l.currency FROM loan_payments lp LEFT JOIN loans l ON lp.loan_id=l.id").fetchall()
+            for lp in lp_rows:
+                try:
+                    lpd = date.fromisoformat(lp["payment_date"])
+                    if lpd.year == FY and 1 <= lpd.month <= 12:
+                        manual_loan_payments[lpd.month - 1] += to_usd(lp["amount"], lp["currency"] or "ILS", ML[lpd.month - 1])
+                except: pass
+    except: pass
+    # Calculate balance per month: add new loans, subtract scheduled principal + manual payments
     for i in range(12):
         loan_remaining += loan_additions[i]
         loan_remaining -= data[i].get("loanPrincipal", 0)
+        loan_remaining -= manual_loan_payments[i]
         loan_bal_by_month[i] = round(max(0, loan_remaining), 2)
+    
+    # Add manual payments to cashOut
+    for i in range(12):
+        data[i]["manualLoanPayment"] = round(manual_loan_payments[i], 2)
     
     # Load payroll payment defaults
     payroll_defaults = {"net_day": 9, "net_offset": 1, "tax_day": 15, "tax_offset": 1, "pension_day": 15, "pension_offset": 1}
@@ -1135,7 +1193,7 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
         # Total payroll cash out
         d["cfPayrollTotal"] = round(d["cfGross"] + d["cfPension"] + d["cfTax"], 2)
         
-        d["cashOut"]=round(d["cfPayrollTotal"] + d.get("vendorCashOut", sum(d["vd"].values())), 2)
+        d["cashOut"]=round(d["cfPayrollTotal"] + d.get("vendorCashOut", sum(d["vd"].values())) + d.get("manualLoanPayment", 0), 2)
         d["netCashflow"]=round(d["cashIn"]-d["cashOut"],2)
         cum+=d["netCashflow"]; d["cumCash"]=round(cum,2)
         
@@ -1250,7 +1308,8 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
                       "annualRate":ln["annual_rate"],"startDate":ln["start_date"],"repaymentType":ln["repayment_type"],
                       "currency":ln.get("currency","ILS"),"notes":ln.get("notes",""),
                       "interestStartMonth":ln.get("interest_start_month",""),
-                      "openingBalance":ln.get("opening_balance",0)} for ln in load_loans()],
+                      "openingBalance":ln.get("opening_balance",0),
+                      "loanType":ln.get("loan_type","bank")} for ln in load_loans()],
             "incomeSources": [{"id":inc["id"],"client":inc["client"],"category":inc.get("category",""),
                                "currency":inc.get("currency","ILS"),
                                "contactName":inc.get("contact_name",""),"contactPhone":inc.get("contact_phone",""),
@@ -2080,6 +2139,15 @@ def calc_loan_schedule(amount, term_months, annual_rate, start_date_str, repayme
 @app.get("/api/loans")
 def get_loans(user=Depends(require_admin)):
     loans = load_loans()
+    # Load all manual payments
+    manual_pays = {}
+    try:
+        with get_db() as db:
+            lp_rows = db.execute("SELECT * FROM loan_payments ORDER BY payment_date").fetchall()
+            for lp in lp_rows:
+                manual_pays.setdefault(lp["loan_id"], []).append(
+                    {"id":lp["id"],"amount":lp["amount"],"paymentDate":lp["payment_date"],"notes":lp["notes"] or ""})
+    except: pass
     result = []
     for ln in loans:
         sch = calc_loan_schedule(ln["amount"], ln["term_months"], ln["annual_rate"], ln["start_date"], ln["repayment_type"], ln.get("interest_start_month",""))
@@ -2087,8 +2155,12 @@ def get_loans(user=Depends(require_admin)):
             "termMonths":ln["term_months"],"annualRate":ln["annual_rate"],
             "startDate":ln["start_date"],"repaymentType":ln["repayment_type"],
             "currency":ln.get("currency","ILS"),"notes":ln.get("notes",""),
+            "openingBalance":ln.get("opening_balance",0),
+            "loanType":ln.get("loan_type","bank"),
+            "interestStartMonth":ln.get("interest_start_month",""),
             "totalPayment":round(sum(s["payment"] for s in sch),2),
             "totalInterest":round(sum(s["interest"] for s in sch),2),
+            "manualPayments":manual_pays.get(ln["id"],[]),
             "schedule":sch})
     return result
 
@@ -2098,27 +2170,58 @@ class LoanIn(BaseModel):
     currency:str="ILS"; notes:str=""
     interestStartMonth:str=""
     openingBalance:float=0
+    loanType:str="bank"
 
 @app.post("/api/loans")
 def add_loan(b: LoanIn, user=Depends(require_admin)):
     lid = f"ln_{uuid4().hex[:8]}"
     now = datetime.now().isoformat()
     with get_db() as db:
-        db.execute("INSERT INTO loans (id,lender,amount,term_months,annual_rate,start_date,repayment_type,currency,notes,interest_start_month,opening_balance,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (lid,b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,now))
+        db.execute("INSERT INTO loans (id,lender,amount,term_months,annual_rate,start_date,repayment_type,currency,notes,interest_start_month,opening_balance,loan_type,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (lid,b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,b.loanType,now))
     return {"ok":True,"id":lid}
 
 @app.put("/api/loans/{lid}")
 def upd_loan(lid:str, b:LoanIn, user=Depends(require_admin)):
     with get_db() as db:
-        db.execute("UPDATE loans SET lender=?,amount=?,term_months=?,annual_rate=?,start_date=?,repayment_type=?,currency=?,notes=?,interest_start_month=?,opening_balance=? WHERE id=?",
-                   (b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,lid))
+        db.execute("UPDATE loans SET lender=?,amount=?,term_months=?,annual_rate=?,start_date=?,repayment_type=?,currency=?,notes=?,interest_start_month=?,opening_balance=?,loan_type=? WHERE id=?",
+                   (b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,b.loanType,lid))
     return {"ok":True}
 
 @app.delete("/api/loans/{lid}")
 def del_loan(lid:str, user=Depends(require_admin)):
-    with get_db() as db: db.execute("DELETE FROM loans WHERE id=?",(lid,))
+    with get_db() as db:
+        db.execute("DELETE FROM loans WHERE id=?",(lid,))
+        db.execute("DELETE FROM loan_payments WHERE loan_id=?",(lid,))
     return {"ok":True}
+
+# Manual loan payments
+class LoanPaymentIn(BaseModel):
+    loanId: str
+    amount: float
+    paymentDate: str
+    notes: str = ""
+
+@app.post("/api/loan-payment")
+def add_loan_payment(b: LoanPaymentIn, user=Depends(require_admin)):
+    lpid = f"lp_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("INSERT INTO loan_payments (id,loan_id,amount,payment_date,notes,created_at) VALUES (?,?,?,?,?,?)",
+                   (lpid, b.loanId, b.amount, b.paymentDate, b.notes, now))
+    return {"ok": True, "id": lpid}
+
+@app.delete("/api/loan-payment/{lpid}")
+def del_loan_payment(lpid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM loan_payments WHERE id=?", (lpid,))
+    return {"ok": True}
+
+@app.get("/api/loan-payments/{loan_id}")
+def get_loan_payments(loan_id: str, user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM loan_payments WHERE loan_id=? ORDER BY payment_date", (loan_id,)).fetchall()
+    return [{"id":r["id"],"amount":r["amount"],"paymentDate":r["payment_date"],"notes":r["notes"] or ""} for r in rows]
 
 class LoanOpeningBalance(BaseModel):
     amount: float
@@ -2301,6 +2404,50 @@ def get_expense_payments(expense_id: str, user=Depends(require_admin)):
 # ══════════════════════════════════════════
 
 # ══════════════════════════════════════════
+# ══════════════════════════════════════════
+# INVESTMENTS (equity received)
+# ══════════════════════════════════════════
+class InvestmentIn(BaseModel):
+    investor: str
+    amount: float
+    currency: str = "ILS"
+    investmentDate: str
+    paymentDate: str = ""
+    investmentType: str = "equity"
+    notes: str = ""
+
+@app.post("/api/investments")
+def add_investment(b: InvestmentIn, user=Depends(require_admin)):
+    iid = f"inv_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    with get_db() as db:
+        db.execute("""INSERT INTO investments (id,investor,amount,currency,investment_date,payment_date,investment_type,notes,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?)""",
+                   (iid, b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, b.investmentType, b.notes, now))
+    return {"ok": True, "id": iid}
+
+@app.put("/api/investments/{iid}")
+def upd_investment(iid: str, b: InvestmentIn, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("""UPDATE investments SET investor=?,amount=?,currency=?,investment_date=?,payment_date=?,investment_type=?,notes=? WHERE id=?""",
+                   (b.investor, b.amount, b.currency, b.investmentDate, b.paymentDate or b.investmentDate, b.investmentType, b.notes, iid))
+    return {"ok": True}
+
+@app.delete("/api/investments/{iid}")
+def del_investment(iid: str, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("DELETE FROM investments WHERE id=?", (iid,))
+    return {"ok": True}
+
+@app.get("/api/investments")
+def get_investments(user=Depends(require_admin)):
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM investments ORDER BY investment_date").fetchall()
+    return [{"id":r["id"],"investor":r["investor"],"amount":r["amount"],
+             "currency":r.get("currency","ILS"),"investmentDate":r["investment_date"],
+             "paymentDate":r.get("payment_date",""),"investmentType":r.get("investment_type","equity"),
+             "notes":r.get("notes","")} for r in rows]
+
 # OPENING BALANCES (prior year payroll liabilities)
 # ══════════════════════════════════════════
 @app.get("/api/opening-balances")
@@ -2833,9 +2980,10 @@ def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
         is_current = ml == current_month_str
         
         revenue = s["cashIn"]
-        labor_total = sum(s["lab"].values())
-        vendor_total = sum(s["vd"].values())
-        total_expenses = labor_total + vendor_total
+        payroll_cf = s.get("cfPayrollTotal", 0)
+        vendor_cf = s.get("vendorCashOut", 0)
+        loan_cf = s.get("loanPayment", 0) + s.get("manualLoanPayment", 0)
+        total_expenses = payroll_cf + vendor_cf + loan_cf
         net = revenue - total_expenses
         
         auto_opening = prev_closing
@@ -2868,8 +3016,9 @@ def cashflow_report(currency: str = "USD", user=Depends(require_admin)):
             "isForecast": not is_past and not is_current,
             "openingBalance": round(opening * conv, 2),
             "revenue": round(revenue * conv, 2),
-            "laborCost": round(labor_total * conv, 2),
-            "vendorExpenses": round(vendor_total * conv, 2),
+            "laborCost": round(payroll_cf * conv, 2),
+            "vendorExpenses": round(vendor_cf * conv, 2),
+            "loanExpenses": round(loan_cf * conv, 2),
             "totalExpenses": round(total_expenses * conv, 2),
             "netCashflow": round(net * conv, 2),
             "closingBalance": round(closing * conv, 2),
