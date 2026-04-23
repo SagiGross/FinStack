@@ -236,6 +236,7 @@ def init_db():
             category TEXT NOT NULL,
             section TEXT NOT NULL DEFAULT 'opex',
             amount REAL DEFAULT 0,
+            currency TEXT DEFAULT 'USD',
             UNIQUE(year, month, category)
         );
         CREATE TABLE IF NOT EXISTS pl_categories (
@@ -251,6 +252,7 @@ def init_db():
             category TEXT NOT NULL,
             section TEXT NOT NULL DEFAULT 'assets',
             amount REAL DEFAULT 0,
+            currency TEXT DEFAULT 'USD',
             UNIQUE(year, month, category)
         );
         CREATE TABLE IF NOT EXISTS bs_categories (
@@ -258,6 +260,12 @@ def init_db():
             name TEXT NOT NULL UNIQUE,
             section TEXT NOT NULL DEFAULT 'assets',
             sort_order INTEGER DEFAULT 100
+        );
+        CREATE TABLE IF NOT EXISTS monthly_rates (
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            rate REAL NOT NULL DEFAULT 3.5,
+            PRIMARY KEY(year, month)
         );
         CREATE TABLE IF NOT EXISTS investments (
             id TEXT PRIMARY KEY,
@@ -411,31 +419,28 @@ def set_exchange_rate(rate):
         db.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('rate_cache_time',?)", (str(_time.time()),))
 
 def get_rate_for_month(month_str):
-    """Locked months use stored rate. Current/future use live."""
-    with get_db() as db:
-        r = db.execute("SELECT rate, locked FROM monthly_rates WHERE month=?", (month_str,)).fetchone()
-        if r and r["locked"]:
-            return r["rate"]
+    """Get stored rate for a month. Format: '01-2026'. Falls back to live rate."""
+    try:
+        parts = month_str.split("-")
+        mi = int(parts[0])
+        yr = int(parts[1])
+        with get_db() as db:
+            r = db.execute("SELECT rate FROM monthly_rates WHERE year=? AND month=?", (yr, mi)).fetchone()
+            if r: return r["rate"]
+    except: pass
     return get_exchange_rate()
 
 def lock_past_months():
-    """Lock rates for past months on startup. Uses stored rate if available, otherwise current live rate."""
+    """Ensure past months have stored rates. Uses live rate as fallback for missing months."""
     now = datetime.now()
-    current_month = f"{now.month:02d}-{now.year}"
     live_rate = get_exchange_rate()
     with get_db() as db:
-        for m in ML:
-            if m < current_month:
-                existing = db.execute("SELECT rate, locked FROM monthly_rates WHERE month=?", (m,)).fetchone()
-                if not existing:
-                    # No rate stored yet — lock with current live rate as best estimate
-                    db.execute("INSERT INTO monthly_rates (month, rate, locked) VALUES (?,?,1)", (m, live_rate))
-                    print(f"  Rate locked: {m} = {live_rate:.2f} (live fallback)")
-                elif not existing["locked"]:
-                    # Rate was stored but not locked — lock it (keeps the stored rate)
-                    db.execute("UPDATE monthly_rates SET locked=1 WHERE month=?", (m,))
-                    print(f"  Rate locked: {m} = {existing['rate']:.2f} (stored)")
-                # If already locked, don't touch it
+        for yr in [2025, 2026]:
+            for mi in range(1, 13):
+                if yr < now.year or (yr == now.year and mi < now.month):
+                    existing = db.execute("SELECT rate FROM monthly_rates WHERE year=? AND month=?", (yr, mi)).fetchone()
+                    if not existing:
+                        db.execute("INSERT OR IGNORE INTO monthly_rates (year, month, rate) VALUES (?,?,?)", (yr, mi, live_rate))
 
 def get_eur_rate():
     """Get EUR/USD rate. Try cached, then live."""
@@ -490,6 +495,8 @@ def auto_migrate():
         ("investments", "sub_type", "TEXT DEFAULT ''"),
         ("investments", "term_months", "INTEGER DEFAULT 0"),
         ("investments", "annual_rate", "REAL DEFAULT 0"),
+        ("pl_manual", "currency", "TEXT DEFAULT 'USD'"),
+        ("bs_manual", "currency", "TEXT DEFAULT 'USD'"),
         ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
@@ -1670,8 +1677,11 @@ class RateUpdate(BaseModel):
 def api_get_rate():
     rate = get_exchange_rate()
     with get_db() as db:
-        rows = db.execute("SELECT month, rate, locked FROM monthly_rates ORDER BY month").fetchall()
-    monthly = {r["month"]: {"rate": r["rate"], "locked": bool(r["locked"])} for r in rows}
+        rows = db.execute("SELECT year, month, rate FROM monthly_rates ORDER BY year, month").fetchall()
+    monthly = {}
+    for r in rows:
+        key = f"{r['month']:02d}-{r['year']}"
+        monthly[key] = {"rate": r["rate"], "locked": True}
     now = datetime.now()
     current_month = f"{now.month:02d}-{now.year}"
     return {"rate": rate, "currentMonth": current_month, "monthlyRates": monthly}
@@ -1679,13 +1689,13 @@ def api_get_rate():
 @app.put("/api/exchange-rate")
 def api_set_rate(b: RateUpdate, user=Depends(require_admin)):
     set_exchange_rate(b.rate)
-    # Also set for current and future unlocked months
+    # Also set for current and future months in 2026
     now = datetime.now()
-    current_month = f"{now.month:02d}-{now.year}"
     with get_db() as db:
-        for m in ML:
-            if m >= current_month:
-                db.execute("INSERT OR REPLACE INTO monthly_rates (month, rate, locked) VALUES (?,?,0)", (m, b.rate))
+        for mi in range(1, 13):
+            m_str = f"{mi:02d}-{FY}"
+            if m_str >= f"{now.month:02d}-{now.year}":
+                db.execute("INSERT OR REPLACE INTO monthly_rates (year, month, rate) VALUES (?,?,?)", (FY, mi, b.rate))
     return {"ok": True, "rate": b.rate}
 
 class MonthRateLock(BaseModel):
@@ -2503,16 +2513,17 @@ PL_DEFAULT_CATS = [
     ("Revenue", "revenue", 10),
     ("R&D Labor", "cogs", 20),
     ("R&D Vendors", "cogs", 21),
-    ("Management Labor", "opex", 30),
-    ("S&M Labor", "opex", 31),
-    ("G&A Expenses", "opex", 40),
-    ("Legal", "opex", 41),
-    ("Cloud", "opex", 42),
-    ("Insurance", "opex", 43),
-    ("Training", "opex", 44),
-    ("Rent", "opex", 45),
-    ("Traveling", "opex", 46),
-    ("S&M Expenses", "opex", 47),
+    ("Management Labor", "ga_expenses", 30),
+    ("S&M Labor", "sm_expenses", 31),
+    ("G&A Expenses", "ga_expenses", 40),
+    ("Legal", "ga_expenses", 41),
+    ("Cloud", "rd_expenses", 42),
+    ("Insurance", "ga_expenses", 43),
+    ("Training", "ga_expenses", 44),
+    ("Rent", "ga_expenses", 45),
+    ("Traveling", "sm_expenses", 46),
+    ("S&M Expenses", "sm_expenses", 47),
+    ("R&D Expenses", "rd_expenses", 48),
     ("Interest", "finance", 60),
     ("Bank Fees", "finance", 61),
 ]
@@ -2534,6 +2545,30 @@ def ensure_default_categories():
             db.execute("INSERT OR IGNORE INTO pl_categories (name, section, sort_order) VALUES (?,?,?)", (name, section, sort))
         for name, section, sort in BS_DEFAULT_CATS:
             db.execute("INSERT OR IGNORE INTO bs_categories (name, section, sort_order) VALUES (?,?,?)", (name, section, sort))
+        # Seed monthly exchange rates (USD/ILS monthly averages)
+        rates_2025 = {1:3.58, 2:3.59, 3:3.64, 4:3.75, 5:3.56, 6:3.54, 7:3.38, 8:3.36, 9:3.34, 10:3.28, 11:3.26, 12:3.19}
+        rates_2026 = {1:3.10, 2:3.12, 3:3.09, 4:3.00, 5:3.00, 6:3.00, 7:3.00, 8:3.00, 9:3.00, 10:3.00, 11:3.00, 12:3.00}
+        for y, rates in [(2025, rates_2025), (2026, rates_2026)]:
+            for m, r in rates.items():
+                db.execute("INSERT OR IGNORE INTO monthly_rates (year, month, rate) VALUES (?,?,?)", (y, m, r))
+
+@app.get("/api/monthly-rates/{year}")
+def get_monthly_rates(year: int, user=Depends(require_admin)):
+    ensure_default_categories()
+    with get_db() as db:
+        rows = db.execute("SELECT month, rate FROM monthly_rates WHERE year=? ORDER BY month", (year,)).fetchall()
+    return {str(r["month"]): r["rate"] for r in rows}
+
+class MonthlyRateUpdate(BaseModel):
+    year: int
+    month: int
+    rate: float
+
+@app.put("/api/monthly-rates")
+def set_monthly_rate(b: MonthlyRateUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO monthly_rates (year, month, rate) VALUES (?,?,?)", (b.year, b.month, b.rate))
+    return {"ok": True}
 
 @app.get("/api/pl-categories")
 def get_pl_categories(user=Depends(require_admin)):
@@ -2561,21 +2596,55 @@ def del_pl_category(cid: int, user=Depends(require_admin)):
             db.execute("DELETE FROM pl_manual WHERE category=?", (row["name"],))
     return {"ok": True}
 
+class PLCategoryUpdate(BaseModel):
+    name: str
+    section: str
+
+@app.put("/api/pl-categories/{cid}")
+def upd_pl_category(cid: int, b: PLCategoryUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        old = db.execute("SELECT name FROM pl_categories WHERE id=?", (cid,)).fetchone()
+        if old:
+            db.execute("UPDATE pl_categories SET name=?, section=? WHERE id=?", (b.name, b.section, cid))
+            if old["name"] != b.name:
+                db.execute("UPDATE pl_manual SET category=?, section=? WHERE category=?", (b.name, b.section, old["name"]))
+            else:
+                db.execute("UPDATE pl_manual SET section=? WHERE category=?", (b.section, b.name))
+    return {"ok": True}
+
+class BSCategoryUpdate(BaseModel):
+    name: str
+    section: str
+
+@app.put("/api/bs-categories/{cid}")
+def upd_bs_category(cid: int, b: BSCategoryUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        old = db.execute("SELECT name FROM bs_categories WHERE id=?", (cid,)).fetchone()
+        if old:
+            db.execute("UPDATE bs_categories SET name=?, section=? WHERE id=?", (b.name, b.section, cid))
+            if old["name"] != b.name:
+                db.execute("UPDATE bs_manual SET category=?, section=? WHERE category=?", (b.name, b.section, old["name"]))
+            else:
+                db.execute("UPDATE bs_manual SET section=? WHERE category=?", (b.section, b.name))
+    return {"ok": True}
+
 @app.get("/api/pl-data/{year}")
 def get_pl_data(year: int, user=Depends(require_admin)):
     ensure_default_categories()
     with get_db() as db:
         cats = db.execute("SELECT * FROM pl_categories ORDER BY sort_order, name").fetchall()
-        rows = db.execute("SELECT month, category, amount FROM pl_manual WHERE year=?", (year,)).fetchall()
+        rows = db.execute("SELECT month, category, amount, currency FROM pl_manual WHERE year=?", (year,)).fetchall()
     data = {}
+    currencies = {}
     for r in rows:
         data.setdefault(r["category"], {})[r["month"]] = r["amount"]
+        currencies[r["category"]] = r["currency"] or "USD"
     result = []
     for c in cats:
         months = {}
         for mi in range(1, 13):
             months[str(mi)] = data.get(c["name"], {}).get(mi, 0)
-        result.append({"name": c["name"], "section": c["section"], "months": months})
+        result.append({"id": c["id"], "name": c["name"], "section": c["section"], "months": months, "currency": currencies.get(c["name"], "USD")})
     return {"year": year, "categories": result}
 
 class PLDataUpdate(BaseModel):
@@ -2583,14 +2652,27 @@ class PLDataUpdate(BaseModel):
     category: str
     month: int
     amount: float
+    currency: str = "USD"
 
 @app.put("/api/pl-data")
 def set_pl_data(b: PLDataUpdate, user=Depends(require_admin)):
     with get_db() as db:
         cat = db.execute("SELECT section FROM pl_categories WHERE name=?", (b.category,)).fetchone()
         section = cat["section"] if cat else "opex"
-        db.execute("INSERT OR REPLACE INTO pl_manual (year, month, category, section, amount) VALUES (?,?,?,?,?)",
-                   (b.year, b.month, b.category, section, b.amount))
+        db.execute("INSERT OR REPLACE INTO pl_manual (year, month, category, section, amount, currency) VALUES (?,?,?,?,?,?)",
+                   (b.year, b.month, b.category, section, b.amount, b.currency))
+    return {"ok": True}
+
+# Bulk update currency for a category
+class PLCurrencyUpdate(BaseModel):
+    year: int
+    category: str
+    currency: str
+
+@app.put("/api/pl-currency")
+def set_pl_currency(b: PLCurrencyUpdate, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("UPDATE pl_manual SET currency=? WHERE year=? AND category=?", (b.currency, b.year, b.category))
     return {"ok": True}
 
 @app.get("/api/bs-categories")
@@ -2624,16 +2706,18 @@ def get_bs_data(year: int, user=Depends(require_admin)):
     ensure_default_categories()
     with get_db() as db:
         cats = db.execute("SELECT * FROM bs_categories ORDER BY sort_order, name").fetchall()
-        rows = db.execute("SELECT month, category, amount FROM bs_manual WHERE year=?", (year,)).fetchall()
+        rows = db.execute("SELECT month, category, amount, currency FROM bs_manual WHERE year=?", (year,)).fetchall()
     data = {}
+    currencies = {}
     for r in rows:
         data.setdefault(r["category"], {})[r["month"]] = r["amount"]
+        currencies[r["category"]] = r["currency"] or "USD"
     result = []
     for c in cats:
         months = {}
         for mi in range(1, 13):
             months[str(mi)] = data.get(c["name"], {}).get(mi, 0)
-        result.append({"name": c["name"], "section": c["section"], "months": months})
+        result.append({"name": c["name"], "section": c["section"], "months": months, "currency": currencies.get(c["name"], "USD")})
     return {"year": year, "categories": result}
 
 class BSDataUpdate(BaseModel):
@@ -2641,14 +2725,15 @@ class BSDataUpdate(BaseModel):
     category: str
     month: int
     amount: float
+    currency: str = "USD"
 
 @app.put("/api/bs-data")
 def set_bs_data(b: BSDataUpdate, user=Depends(require_admin)):
     with get_db() as db:
         cat = db.execute("SELECT section FROM bs_categories WHERE name=?", (b.category,)).fetchone()
         section = cat["section"] if cat else "assets"
-        db.execute("INSERT OR REPLACE INTO bs_manual (year, month, category, section, amount) VALUES (?,?,?,?,?)",
-                   (b.year, b.month, b.category, section, b.amount))
+        db.execute("INSERT OR REPLACE INTO bs_manual (year, month, category, section, amount, currency) VALUES (?,?,?,?,?,?)",
+                   (b.year, b.month, b.category, section, b.amount, b.currency))
     return {"ok": True}
 
 # OPENING BALANCES (prior year payroll liabilities)
