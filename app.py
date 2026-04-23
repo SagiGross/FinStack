@@ -186,6 +186,7 @@ def init_db():
             currency TEXT DEFAULT 'ILS',
             notes TEXT DEFAULT '',
             interest_start_month TEXT DEFAULT '',
+            opening_balance REAL DEFAULT 0,
             created_at TEXT
         );
         CREATE TABLE IF NOT EXISTS cap_table (
@@ -429,6 +430,7 @@ def auto_migrate():
         ("expenses", "subject_to_vat", "INTEGER DEFAULT 1"),
         ("contracts", "subject_to_vat", "INTEGER DEFAULT 0"),
         ("loans", "interest_start_month", "TEXT DEFAULT ''"),
+        ("loans", "opening_balance", "REAL DEFAULT 0"),
         ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
@@ -499,6 +501,15 @@ def seed_db():
         db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_tax_month_offset','1')")
         db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_pension_day','15')")
         db.execute("INSERT OR IGNORE INTO app_settings VALUES ('payroll_pension_month_offset','1')")
+        # Opening balances (payroll liabilities from prior year)
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_net_salary','0')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_net_salary_date','')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_tax','0')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_tax_date','')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_social_security','0')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_social_security_date','')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_pension','0')")
+        db.execute("INSERT OR IGNORE INTO app_settings VALUES ('ob_pension_date','')")
         # Users
         admin_hash = hash_pw("admin123")
         sales_hash = hash_pw("sales123")
@@ -964,7 +975,8 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
     
     # ── Loan balances per month ──
     loan_bal_by_month = [0.0] * 12
-    loan_remaining = loan_opening_bal
+    # Sum per-loan opening balances (replaces global loan_opening_bal)
+    loan_remaining = sum(to_usd(ln.get("opening_balance", 0), ln.get("currency","ILS"), ML[0]) for ln in loans)
     # Build map of new loans by start month
     loan_additions = [0.0] * 12
     for ln in loans:
@@ -1072,6 +1084,27 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
             cf_pension_pay[e_pen_mi] += to_usd(bd["socialSecurity"] + bd["pension"] + bd["studyFund"] + bd["disability"], ecur, accrual_ml)
         
         cf_tax_pay[tax_target_mi] += tax_payments.get(accrual_mi + 1, 0)
+    
+    # Add opening balances (prior year payroll liabilities) to Cash Flow
+    try:
+        with get_db() as db:
+            ob_items = [
+                ("ob_net_salary", "ob_net_salary_date", cf_net_pay),
+                ("ob_tax", "ob_tax_date", cf_tax_pay),
+                ("ob_social_security", "ob_social_security_date", cf_pension_pay),
+                ("ob_pension", "ob_pension_date", cf_pension_pay),
+            ]
+            for amt_key, date_key, target_arr in ob_items:
+                amt_r = db.execute("SELECT value FROM app_settings WHERE key=?", (amt_key,)).fetchone()
+                date_r = db.execute("SELECT value FROM app_settings WHERE key=?", (date_key,)).fetchone()
+                if amt_r and date_r and amt_r["value"] and float(amt_r["value"]) > 0 and date_r["value"]:
+                    try:
+                        pd5 = date.fromisoformat(date_r["value"])
+                        if pd5.year == FY and 1 <= pd5.month <= 12:
+                            ob_usd = to_usd(float(amt_r["value"]), "ILS", ML[pd5.month - 1])
+                            target_arr[pd5.month - 1] += ob_usd
+                    except: pass
+    except: pass
     
     for i, d in enumerate(data):
         d["ar"] = ar_by_month[i]
@@ -1216,7 +1249,8 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
             "loans":[{"id":ln["id"],"lender":ln["lender"],"amount":ln["amount"],"termMonths":ln["term_months"],
                       "annualRate":ln["annual_rate"],"startDate":ln["start_date"],"repaymentType":ln["repayment_type"],
                       "currency":ln.get("currency","ILS"),"notes":ln.get("notes",""),
-                      "interestStartMonth":ln.get("interest_start_month","")} for ln in load_loans()],
+                      "interestStartMonth":ln.get("interest_start_month",""),
+                      "openingBalance":ln.get("opening_balance",0)} for ln in load_loans()],
             "incomeSources": [{"id":inc["id"],"client":inc["client"],"category":inc.get("category",""),
                                "currency":inc.get("currency","ILS"),
                                "contactName":inc.get("contact_name",""),"contactPhone":inc.get("contact_phone",""),
@@ -2063,21 +2097,22 @@ class LoanIn(BaseModel):
     startDate:str; repaymentType:str="principal_interest"
     currency:str="ILS"; notes:str=""
     interestStartMonth:str=""
+    openingBalance:float=0
 
 @app.post("/api/loans")
 def add_loan(b: LoanIn, user=Depends(require_admin)):
     lid = f"ln_{uuid4().hex[:8]}"
     now = datetime.now().isoformat()
     with get_db() as db:
-        db.execute("INSERT INTO loans (id,lender,amount,term_months,annual_rate,start_date,repayment_type,currency,notes,interest_start_month,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                   (lid,b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,now))
+        db.execute("INSERT INTO loans (id,lender,amount,term_months,annual_rate,start_date,repayment_type,currency,notes,interest_start_month,opening_balance,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (lid,b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,now))
     return {"ok":True,"id":lid}
 
 @app.put("/api/loans/{lid}")
 def upd_loan(lid:str, b:LoanIn, user=Depends(require_admin)):
     with get_db() as db:
-        db.execute("UPDATE loans SET lender=?,amount=?,term_months=?,annual_rate=?,start_date=?,repayment_type=?,currency=?,notes=?,interest_start_month=? WHERE id=?",
-                   (b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,lid))
+        db.execute("UPDATE loans SET lender=?,amount=?,term_months=?,annual_rate=?,start_date=?,repayment_type=?,currency=?,notes=?,interest_start_month=?,opening_balance=? WHERE id=?",
+                   (b.lender,b.amount,b.termMonths,b.annualRate,b.startDate,b.repaymentType,b.currency,b.notes,b.interestStartMonth,b.openingBalance,lid))
     return {"ok":True}
 
 @app.delete("/api/loans/{lid}")
@@ -2264,6 +2299,43 @@ def get_expense_payments(expense_id: str, user=Depends(require_admin)):
 
 # SALARY SNAPSHOTS
 # ══════════════════════════════════════════
+
+# ══════════════════════════════════════════
+# OPENING BALANCES (prior year payroll liabilities)
+# ══════════════════════════════════════════
+@app.get("/api/opening-balances")
+def get_opening_balances(user=Depends(require_admin)):
+    keys = ["ob_net_salary","ob_net_salary_date","ob_tax","ob_tax_date",
+            "ob_social_security","ob_social_security_date","ob_pension","ob_pension_date"]
+    result = {}
+    with get_db() as db:
+        for k in keys:
+            r = db.execute("SELECT value FROM app_settings WHERE key=?", (k,)).fetchone()
+            result[k] = r["value"] if r else ("0" if "date" not in k else "")
+    return result
+
+class OpeningBalances(BaseModel):
+    obNetSalary: float = 0
+    obNetSalaryDate: str = ""
+    obTax: float = 0
+    obTaxDate: str = ""
+    obSocialSecurity: float = 0
+    obSocialSecurityDate: str = ""
+    obPension: float = 0
+    obPensionDate: str = ""
+
+@app.put("/api/opening-balances")
+def set_opening_balances(b: OpeningBalances, user=Depends(require_admin)):
+    with get_db() as db:
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_net_salary',?)", (str(b.obNetSalary),))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_net_salary_date',?)", (b.obNetSalaryDate,))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_tax',?)", (str(b.obTax),))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_tax_date',?)", (b.obTaxDate,))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_social_security',?)", (str(b.obSocialSecurity),))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_social_security_date',?)", (b.obSocialSecurityDate,))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_pension',?)", (str(b.obPension),))
+        db.execute("INSERT OR REPLACE INTO app_settings VALUES ('ob_pension_date',?)", (b.obPensionDate,))
+    return {"ok": True}
 
 # ══════════════════════════════════════════
 # INCOME SOURCES & PAYMENTS

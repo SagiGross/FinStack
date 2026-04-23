@@ -3386,6 +3386,38 @@ function renderSettings(el){
     }
   }).catch(function(){});
 
+  // Opening Balances section
+  authFetch('/api/opening-balances').then(function(r){return r.json()}).then(function(ob){
+    var obDiv=document.createElement('div');
+    obDiv.className='tw';obDiv.style.marginTop='16px';
+    var obh='<div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Prior Year Payroll Liabilities <button class="btn-p" id="btnSaveOB" style="padding:6px 14px;font-size:11px">Save</button></div>';
+    obh+='<div style="padding:10px 14px;font-size:12px;color:var(--txM)">Payroll from 2025 paid in 2026. Affects Cash Flow & Balance Sheet only (not P&L).</div>';
+    obh+='<div style="padding:0 14px 14px"><div class="modal-grid">';
+    obh+='<div class="mf"><label>Net Salary (\u20AA)</label><input id="ob-net" type="number" value="'+(ob.ob_net_salary||0)+'"></div>';
+    obh+='<div class="mf"><label>Payment Date</label><input id="ob-net-date" type="date" value="'+(ob.ob_net_salary_date||'')+'"></div>';
+    obh+='<div class="mf"><label>Tax (\u20AA)</label><input id="ob-tax" type="number" value="'+(ob.ob_tax||0)+'"></div>';
+    obh+='<div class="mf"><label>Payment Date</label><input id="ob-tax-date" type="date" value="'+(ob.ob_tax_date||'')+'"></div>';
+    obh+='<div class="mf"><label>Social Security (\u20AA)</label><input id="ob-ss" type="number" value="'+(ob.ob_social_security||0)+'"></div>';
+    obh+='<div class="mf"><label>Payment Date</label><input id="ob-ss-date" type="date" value="'+(ob.ob_social_security_date||'')+'"></div>';
+    obh+='<div class="mf"><label>Pension + SF (\u20AA)</label><input id="ob-pen" type="number" value="'+(ob.ob_pension||0)+'"></div>';
+    obh+='<div class="mf"><label>Payment Date</label><input id="ob-pen-date" type="date" value="'+(ob.ob_pension_date||'')+'"></div>';
+    obh+='</div></div>';
+    obDiv.innerHTML=obh;
+    document.getElementById('st-semp').appendChild(obDiv);
+    document.getElementById('btnSaveOB').addEventListener('click',function(){
+      authFetch('/api/opening-balances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        obNetSalary:parseFloat(document.getElementById('ob-net').value)||0,
+        obNetSalaryDate:document.getElementById('ob-net-date').value||'',
+        obTax:parseFloat(document.getElementById('ob-tax').value)||0,
+        obTaxDate:document.getElementById('ob-tax-date').value||'',
+        obSocialSecurity:parseFloat(document.getElementById('ob-ss').value)||0,
+        obSocialSecurityDate:document.getElementById('ob-ss-date').value||'',
+        obPension:parseFloat(document.getElementById('ob-pen').value)||0,
+        obPensionDate:document.getElementById('ob-pen-date').value||''
+      })}).then(function(r){return r.json()}).then(function(res){if(res.ok)toast('Opening balances saved')});
+    });
+  }).catch(function(){});
+
   // Save Payroll Month button
   document.getElementById('btnSavePayroll').addEventListener('click',function(){
     var now=new Date();
@@ -3917,23 +3949,21 @@ function renderLoansTab(){
   el.innerHTML='<div style="padding:20px;color:var(--txM)">Loading loans...</div>';
   authFetch('/api/loans').then(function(r){return r.json()}).then(function(loans){
     var repLabels={principal_interest:'Principal + Interest',interest_only:'Interest Only',principal_only:'Principal Only',balloon:'Balloon / Grace'};
-    // Opening balance
-    var openBal=0;
-    try{var obSetting=(D.summary&&D.summary[0])?D.summary[0].loanBalance:0;openBal=obSetting||0}catch(e){}
-    var h='<div class="cc" style="margin-bottom:14px"><div class="cc-t">Loan Opening Balance (Start of Year)</div>';
-    h+='<div style="display:flex;gap:8px;align-items:flex-end">';
-    h+='<div class="mf" style="margin:0;flex:1;max-width:200px"><label style="font-size:10px">Opening Balance ($)</label><input id="loanOpenBal" type="number" value="'+(openBal||0)+'" style="padding:8px 10px;font-size:14px;font-weight:700"></div>';
-    h+='<button class="btn-p" id="saveLoanOpen" style="padding:8px 14px;font-size:11px">Save</button>';
-    h+='</div></div>';
+    // Per-loan opening balances total
+    var totalOB=loans.reduce(function(s,ln){return s+(ln.openingBalance||0)},0);
+    var h='<div class="cc" style="margin-bottom:14px"><div class="cc-t">Loan Opening Balances (Start of Year)</div>';
+    h+='<div style="padding:8px 14px;font-size:13px">Total: <span class="mono" style="font-weight:700;color:var(--am)">\u20AA'+Math.round(totalOB).toLocaleString()+'</span>';
+    h+=' <span style="font-size:11px;color:var(--txM)">(set per loan in Edit)</span></div></div>';
 
     h+='<div class="tw"><div class="tw-h" style="display:flex;justify-content:space-between;align-items:center">Loans <button class="btn-p" id="btnAddLoan" style="padding:6px 14px;font-size:11px">+ Add Loan</button></div>';
-    h+='<div style="overflow-x:auto"><table><thead><tr><th>Lender</th><th>Amount</th><th>Rate</th><th>Term</th><th>Type</th><th>Start</th><th>Total Interest</th><th>Total Payment</th><th></th></tr></thead><tbody>';
-    if(loans.length===0) h+='<tr><td colspan="9" style="text-align:center;color:var(--txM);padding:20px">No loans</td></tr>';
+    h+='<div style="overflow-x:auto"><table><thead><tr><th>Lender</th><th>Amount</th><th>OB</th><th>Rate</th><th>Term</th><th>Type</th><th>Start</th><th>Total Interest</th><th>Total Payment</th><th></th></tr></thead><tbody>';
+    if(loans.length===0) h+='<tr><td colspan="10" style="text-align:center;color:var(--txM);padding:20px">No loans</td></tr>';
     loans.forEach(function(ln){
       var sym=ln.currency==='ILS'?'\u20AA':'$';
       h+='<tr class="clickrow loan-row" data-lid="'+ln.id+'" style="cursor:pointer">';
       h+='<td style="font-weight:600">'+ln.lender+'</td>';
       h+='<td class="mono">'+sym+Math.round(ln.amount).toLocaleString()+'</td>';
+      h+='<td class="mono" style="color:var(--am)">'+(ln.openingBalance?sym+Math.round(ln.openingBalance).toLocaleString():'\u2014')+'</td>';
       h+='<td class="mono">'+ln.annualRate+'%</td>';
       h+='<td class="mono">'+ln.termMonths+' mo</td>';
       h+='<td style="font-size:11px">'+(repLabels[ln.repaymentType]||ln.repaymentType)+'</td>';
@@ -3985,6 +4015,7 @@ function renderLoansTab(){
         repOpts.forEach(function(o){eh+='<option value="'+o[0]+'"'+(ln.repaymentType===o[0]?' selected':'')+'>'+o[1]+'</option>'});
         eh+='</select></div>';
         eh+='<div class="mf"><label>Start Date</label><input id="eln-start" type="date" value="'+ln.startDate+'"></div>';
+        eh+='<div class="mf"><label>Opening Balance (\u20AA)</label><input id="eln-ob" type="number" value="'+(ln.openingBalance||0)+'"><div class="hint">Prior year remaining balance</div></div>';
         eh+='<div class="mf"><label>Notes</label><input id="eln-notes" value="'+(ln.notes||'')+'"></div>';
         var hasCustomInt=ln.interestStartMonth&&ln.interestStartMonth!=='';
         eh+='<div class="mf"><label>Interest Starts</label><div style="display:flex;align-items:center;gap:8px"><input id="eln-intstart-same" type="checkbox"'+(!hasCustomInt?' checked':'')+' style="width:16px;height:16px"><span style="font-size:12px">Same as loan start</span></div><select id="eln-intmonth" style="'+(hasCustomInt?'':'display:none;')+'margin-top:6px">';
@@ -4010,7 +4041,8 @@ function renderLoansTab(){
             repaymentType:document.getElementById('eln-type').value,
             currency:document.getElementById('eln-cur').value,
             notes:document.getElementById('eln-notes').value,
-            interestStartMonth:intStart
+            interestStartMonth:intStart,
+            openingBalance:parseFloat(document.getElementById('eln-ob').value)||0
           })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Loan updated');loadAll().then(function(){renderLoansTab()})}});
         });
       });
@@ -4026,13 +4058,6 @@ function renderLoansTab(){
     });
 
     // Save loan opening balance
-    var saveLoanOpenBtn=document.getElementById('saveLoanOpen');
-    if(saveLoanOpenBtn) saveLoanOpenBtn.addEventListener('click',function(){
-      var amt=parseFloat(document.getElementById('loanOpenBal').value)||0;
-      authFetch('/api/loans/opening-balance',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})})
-        .then(function(r){return r.json()}).then(function(res){if(res.ok){toast('Opening balance saved');loadAll().then(function(){renderLoansTab()})}});
-    });
-
     // Add loan
     document.getElementById('btnAddLoan').addEventListener('click',function(){
       // Get existing lenders for autocomplete
@@ -4049,6 +4074,7 @@ function renderLoansTab(){
       ah+='<div class="mf"><label>Term (months) *</label><input id="ln-term" type="number" placeholder="36"></div>';
       ah+='<div class="mf"><label>Repayment Type</label><select id="ln-type"><option value="principal_interest">Principal + Interest</option><option value="interest_only">Interest Only</option><option value="principal_only">Principal Only</option><option value="balloon">Balloon / Grace</option></select></div>';
       ah+='<div class="mf"><label>Start Date *</label><input id="ln-start" type="date" value="2026-01-01"></div>';
+      ah+='<div class="mf"><label>Opening Balance (\u20AA)</label><input id="ln-ob" type="number" value="0"><div class="hint">Prior year remaining balance</div></div>';
       ah+='<div class="mf"><label>Notes</label><input id="ln-notes" placeholder="Optional"></div>';
       ah+='<div class="mf"><label>Interest Starts</label><div style="display:flex;align-items:center;gap:8px"><input id="ln-intstart-same" type="checkbox" checked style="width:16px;height:16px"><span style="font-size:12px">Same as loan start</span></div><select id="ln-intmonth" style="display:none;margin-top:6px">';
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach(function(mn,mi){ah+='<option value="'+(mi+1<10?'0':'')+(mi+1)+'-2026">'+mn+' 2026</option>'});
@@ -4075,7 +4101,8 @@ function renderLoansTab(){
           repaymentType:document.getElementById('ln-type').value,
           currency:document.getElementById('ln-cur').value,
           notes:document.getElementById('ln-notes').value,
-          interestStartMonth:intStart
+          interestStartMonth:intStart,
+          openingBalance:parseFloat(document.getElementById('ln-ob').value)||0
         })}).then(function(r){return r.json()}).then(function(res){if(res.ok){closeModal();toast('Loan added');loadAll().then(function(){renderLoansTab()})}});
       });
     });
@@ -4179,18 +4206,19 @@ function openIncomeCard(s){
     authFetch('/api/income-payments/'+s.id).then(function(r){return r.json()}).then(function(invoices){
       var pl=document.getElementById('ic-invlist');if(!pl)return;
       if(!invoices||!invoices.length){pl.innerHTML='No invoices yet. Add invoices above.';return}
+      var csym=s.currency==='ILS'?'\u20AA':s.currency==='EUR'?'\u20AC':'$';
       var ph='<table style="width:100%;font-size:11px"><thead><tr><th>Amount</th><th>Invoice Date</th><th>Payment Date</th><th></th></tr></thead><tbody>';
       var totalAmt=0;
       invoices.forEach(function(inv){
         totalAmt+=inv.amount||0;
         ph+='<tr>';
-        ph+='<td class="mono" style="font-weight:600">'+fmt(inv.amount)+'</td>';
+        ph+='<td class="mono" style="font-weight:600">'+csym+Math.round(inv.amount).toLocaleString()+'</td>';
         ph+='<td style="color:var(--ac)">'+(inv.invoiceDate||'\u2014')+'</td>';
         ph+='<td style="color:var(--gn)">'+(inv.paymentDate||'same month')+'</td>';
         ph+='<td><button class="btn-ghost iinv-del" data-ipid="'+inv.id+'" style="padding:2px 6px;font-size:9px;color:var(--rd)">\u2715</button></td>';
         ph+='</tr>';
       });
-      ph+='<tr style="border-top:2px solid var(--bd);font-weight:700"><td class="mono">'+fmt(totalAmt)+'</td><td colspan="3" style="color:var(--txM)">'+invoices.length+' invoice'+(invoices.length>1?'s':'')+'</td></tr>';
+      ph+='<tr style="border-top:2px solid var(--bd);font-weight:700"><td class="mono">'+csym+Math.round(totalAmt).toLocaleString()+'</td><td colspan="3" style="color:var(--txM)">'+invoices.length+' invoice'+(invoices.length>1?'s':'')+'</td></tr>';
       ph+='</tbody></table>';
       pl.innerHTML=ph;
       pl.querySelectorAll('.iinv-del').forEach(function(btn){
@@ -4318,18 +4346,20 @@ function openExpenseCard(x){
     authFetch('/api/expense-payments/'+x.id).then(function(r){return r.json()}).then(function(invoices){
       var pl=document.getElementById('mx-invlist');if(!pl)return;
       if(!invoices||!invoices.length){pl.innerHTML='No invoices saved yet. Add invoices above.';return}
+      var xCur=x.currency||'ILS';
+      var csym=xCur==='ILS'?'\u20AA':xCur==='EUR'?'\u20AC':'$';
       var ph='<table style="width:100%;font-size:11px"><thead><tr><th>Amount</th><th>Invoice Date</th><th>Payment Date</th><th></th></tr></thead><tbody>';
       var totalAmt=0;
       invoices.forEach(function(inv){
         totalAmt+=inv.amount||0;
         ph+='<tr>';
-        ph+='<td class="mono" style="font-weight:600">'+fmt(inv.amount)+'</td>';
+        ph+='<td class="mono" style="font-weight:600">'+csym+Math.round(inv.amount).toLocaleString()+'</td>';
         ph+='<td style="color:var(--ac)">'+(inv.invoiceDate||'-')+'</td>';
         ph+='<td style="color:var(--gn)">'+(inv.paymentDate||'same month')+'</td>';
         ph+='<td><button class="btn-ghost inv-del" data-epid="'+inv.id+'" style="padding:2px 6px;font-size:9px;color:var(--rd)">\u2715</button></td>';
         ph+='</tr>';
       });
-      ph+='<tr style="border-top:2px solid var(--bd);font-weight:700"><td class="mono">'+fmt(totalAmt)+'</td><td colspan="3" style="color:var(--txM)">'+invoices.length+' invoice'+(invoices.length>1?'s':'')+'</td></tr>';
+      ph+='<tr style="border-top:2px solid var(--bd);font-weight:700"><td class="mono">'+csym+Math.round(totalAmt).toLocaleString()+'</td><td colspan="3" style="color:var(--txM)">'+invoices.length+' invoice'+(invoices.length>1?'s':'')+'</td></tr>';
       ph+='</tbody></table>';
       pl.innerHTML=ph;
       // Delete handlers
