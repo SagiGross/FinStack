@@ -564,12 +564,12 @@ function renderAdminDashboard(el){
 // ══════════════════════════════════════════
 function renderFinancialDashboard(el){
   var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-  h+='<div class="subtabs" id="fdTabs" style="flex:1"><button class="stab act" data-st="pnl">P&L</button><button class="stab" data-st="bs">Balance Sheet</button><button class="stab" data-st="fexp">Expenses</button><button class="stab" data-st="cf2">Cash Flow</button><button class="stab" data-st="sens">Sensitivity</button><button class="stab" data-st="fsum">Summary</button></div>';
+  h+='<div class="subtabs" id="fdTabs" style="flex:1"><button class="stab act" data-st="pnl">P&L</button><button class="stab" data-st="bs">Balance Sheet</button><button class="stab" data-st="fexp">Expenses</button><button class="stab" data-st="cf2">Cash Flow</button><button class="stab" data-st="forecast">Forecast</button><button class="stab" data-st="sens">Sensitivity</button><button class="stab" data-st="fsum">Summary</button></div>';
   h+='<div id="finCurToggle" style="display:flex;gap:4px;margin-left:10px">';
   h+='<button class="btn-ghost fin-cur'+(finCurrency==='USD'?' act':'')+'" data-cur="USD" style="padding:5px 12px;font-size:11px;'+(finCurrency==='USD'?'background:var(--ac);color:#fff':'')+'">$ USD</button>';
   h+='<button class="btn-ghost fin-cur'+(finCurrency==='ILS'?' act':'')+'" data-cur="ILS" style="padding:5px 12px;font-size:11px;'+(finCurrency==='ILS'?'background:var(--ac);color:#fff':'')+'">₪ ILS</button>';
   h+='</div></div>';
-  h+='<div class="stab-content act" id="st-pnl"></div><div class="stab-content" id="st-bs"></div><div class="stab-content" id="st-fexp"></div><div class="stab-content" id="st-cf2"></div><div class="stab-content" id="st-sens"></div><div class="stab-content" id="st-fsum"></div>';
+  h+='<div class="stab-content act" id="st-pnl"></div><div class="stab-content" id="st-bs"></div><div class="stab-content" id="st-fexp"></div><div class="stab-content" id="st-cf2"></div><div class="stab-content" id="st-forecast"></div><div class="stab-content" id="st-sens"></div><div class="stab-content" id="st-fsum"></div>';
   el.innerHTML=h;
 
   // Currency toggle
@@ -592,13 +592,163 @@ function renderFinancialDashboard(el){
     });
   });
 
-  document.getElementById('fdTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#fdTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='cf2'){renderCashFlow(document.getElementById('st-cf2'))}if(b.dataset.st==='bs'){renderBalanceSheet()}if(b.dataset.st==='fexp'){renderFinExpenses()}if(b.dataset.st==='sens'){renderSensitivity()}setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
+  document.getElementById('fdTabs').addEventListener('click',function(e){var b=e.target.closest('.stab');if(!b)return;document.querySelectorAll('#fdTabs .stab').forEach(function(x){x.classList.remove('act')});b.classList.add('act');el.querySelectorAll('.stab-content').forEach(function(x){x.classList.remove('act')});document.getElementById('st-'+b.dataset.st).classList.add('act');if(b.dataset.st==='cf2'){renderCashFlow(document.getElementById('st-cf2'))}if(b.dataset.st==='forecast'){renderForecast()}if(b.dataset.st==='bs'){renderBalanceSheet()}if(b.dataset.st==='fexp'){renderFinExpenses()}if(b.dataset.st==='sens'){renderSensitivity()}setTimeout(function(){Object.values(charts).forEach(function(c){try{c.resize()}catch(e){}})},100)});
   renderPnL();renderFinancialSummary();
   makeDraggableTabs(document.getElementById('fdTabs'),'fin_tabs');
 }
 
 var sensScenarios=[];
 var sensColors=['#ef4444','#f59e0b','#8b5cf6','#06b6d4','#ec4899'];
+
+function renderForecast(){
+  var el=document.getElementById('st-forecast');if(!el)return;
+  el.innerHTML='<div style="padding:40px;text-align:center;color:var(--txM)">Loading forecast...</div>';
+  authFetch('/api/forecast').then(function(r){return r.json()}).then(function(data){
+    var months=data.months;var rate=data.rate;
+    var sym=finCurrency==='ILS'?'\u20AA':'$';
+    function conv(v){return finCurrency==='ILS'?v*rate:v}
+    function fmtF(n){if(!n&&n!==0)return'\u2014';var v=conv(n);var a=Math.abs(v);var s=v<0?'-':'';if(a>=1e6)return s+sym+(a/1e6).toFixed(2)+'M';if(a>=1e3)return s+sym+(a/1e3).toFixed(1)+'K';return s+sym+a.toFixed(0)}
+    
+    var totalIn=months.reduce(function(s,m){return s+m.cashIn},0);
+    var totalOut=months.reduce(function(s,m){return s+m.cashOut},0);
+    var avgBurn=totalOut/24;
+    var endBal=months[months.length-1].cumulative;
+    
+    var h='<h2 style="margin-bottom:16px">24-Month Forecast (Jan 2026 \u2013 Dec 2027)</h2>';
+    
+    // KPIs
+    h+='<div class="kg" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">';
+    h+=kpi('\u2197','Total Cash In',fmtF(totalIn),'24 months','var(--gn)');
+    h+=kpi('\u2198','Total Cash Out',fmtF(totalOut),'24 months','var(--rd)',30);
+    h+=kpi('\u2248','Net',fmtF(totalIn-totalOut),'24 months',totalIn-totalOut>=0?'var(--gn)':'var(--rd)',60);
+    h+=kpi('\u25CF','Avg Burn/mo',fmtF(avgBurn),'Monthly','var(--am)',90);
+    h+=kpi('\u231A','Runway',avgBurn>0?(Math.abs(endBal)/avgBurn).toFixed(1)+' mo':'\u221e','From end','var(--cy)',120);
+    h+='</div>';
+    
+    // Timeline chart
+    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Projected Cash Flow Timeline</div><div style="height:300px"><canvas id="chForecast"></canvas></div></div>';
+    
+    // Stacked breakdown chart
+    h+='<div class="cc" style="margin-bottom:16px"><div class="cc-t">Cash Out Breakdown</div><div style="height:260px"><canvas id="chForecastBreak"></canvas></div></div>';
+    
+    // Monthly table with hover
+    h+='<div class="cc"><div class="cc-t" style="display:flex;justify-content:space-between;align-items:center">Monthly Projection <span style="font-size:10px;color:var(--txM)">Click month for details</span></div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr>';
+    h+='<th style="text-align:left">Month</th><th style="text-align:right;color:var(--gn)">Cash In</th><th style="text-align:right;color:var(--rd)">Cash Out</th><th style="text-align:right">Net</th><th style="text-align:right">Cumulative</th><th style="text-align:right">Items</th>';
+    h+='</tr></thead><tbody>';
+    
+    // Split into 2026 and 2027
+    var labels2026=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    
+    h+='<tr><td colspan="6" style="font-weight:700;color:var(--ac);padding:8px 0 4px">2026</td></tr>';
+    months.slice(0,12).forEach(function(m,i){
+      h+='<tr class="clickrow fc-row" data-mi="'+i+'" style="cursor:pointer">';
+      h+='<td style="font-weight:600">'+labels2026[i]+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--gn)">'+fmtF(m.cashIn)+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--rd)">'+fmtF(m.cashOut)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700;color:'+(m.net>=0?'var(--gn)':'var(--rd)')+'">'+fmtF(m.net)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700">'+fmtF(m.cumulative)+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--txM)">'+m.itemCount+'</td>';
+      h+='</tr>';
+    });
+    
+    h+='<tr><td colspan="6" style="font-weight:700;color:var(--ac);padding:12px 0 4px">2027</td></tr>';
+    months.slice(12).forEach(function(m,i){
+      h+='<tr class="clickrow fc-row" data-mi="'+(12+i)+'" style="cursor:pointer">';
+      h+='<td style="font-weight:600">'+labels2026[i]+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--gn)">'+fmtF(m.cashIn)+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--rd)">'+fmtF(m.cashOut)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700;color:'+(m.net>=0?'var(--gn)':'var(--rd)')+'">'+fmtF(m.net)+'</td>';
+      h+='<td class="mono" style="text-align:right;font-weight:700">'+fmtF(m.cumulative)+'</td>';
+      h+='<td class="mono" style="text-align:right;color:var(--txM)">'+m.itemCount+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table></div></div>';
+    
+    h+='<div style="margin-top:8px;font-size:10px;color:var(--txM)">Recurring items projected forward from latest amount. Mark items as recurring in Expenses/Income tabs.</div>';
+    
+    el.innerHTML=h;
+    
+    // Click row for details
+    el.querySelectorAll('.fc-row').forEach(function(row){
+      row.addEventListener('click',function(){
+        var mi=parseInt(this.dataset.mi);
+        var mo=months[mi];
+        var yr=mi<12?2026:2027;
+        var mName=labels2026[mi%12]+' '+yr;
+        var dh='<div class="modal-bg" id="modalOverlay"><div class="modal-card" style="width:520px">';
+        dh+='<div class="modal-head"><h2>'+mName+' \u2014 Forecast Detail</h2><button class="modal-close" id="modalClose">\u2715</button></div>';
+        dh+='<div class="modal-body">';
+        
+        if(mo.items_in.length>0){
+          dh+='<div class="section-label" style="color:var(--gn)">Cash In ('+fmtF(mo.cashIn)+')</div>';
+          dh+='<table style="width:100%;font-size:11px;margin-bottom:12px"><thead><tr><th style="text-align:left">Source</th><th style="text-align:left">Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+          mo.items_in.forEach(function(it){
+            var itSym=it.currency==='ILS'?'\u20AA':'$';
+            dh+='<tr><td>'+it.name+'</td><td style="color:var(--txM)">'+it.category+'</td>';
+            dh+='<td class="mono" style="text-align:right;color:var(--gn)">'+(it.raw?itSym+Math.round(it.raw).toLocaleString():fmtF(it.amount))+'</td></tr>';
+          });
+          dh+='</tbody></table>';
+        }
+        
+        if(mo.items_out.length>0){
+          dh+='<div class="section-label" style="color:var(--rd)">Cash Out ('+fmtF(mo.cashOut)+')</div>';
+          dh+='<table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left">Source</th><th style="text-align:left">Type</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+          // Group by type
+          var types={};
+          mo.items_out.forEach(function(it){
+            var k=it.type;
+            if(!types[k])types[k]=[];
+            types[k].push(it);
+          });
+          ['payroll','expense','loan'].forEach(function(t){
+            if(!types[t])return;
+            var typeLabel=t==='payroll'?'Payroll':t==='expense'?'Vendor':'Loan';
+            types[t].forEach(function(it){
+              var itSym=(it.currency||'USD')==='ILS'?'\u20AA':'$';
+              dh+='<tr><td>'+it.name+'</td><td style="color:var(--txM)">'+typeLabel+'</td>';
+              dh+='<td class="mono" style="text-align:right;color:var(--rd)">'+(it.raw?itSym+Math.round(it.raw).toLocaleString():fmtF(it.amount))+'</td></tr>';
+            });
+          });
+          dh+='</tbody></table>';
+        }
+        
+        dh+='</div><div class="modal-foot"><button class="btn-ghost" id="fcX">Close</button></div></div></div>';
+        document.body.insertAdjacentHTML('beforeend',dh);
+        document.getElementById('modalClose').addEventListener('click',closeModal);
+        document.getElementById('fcX').addEventListener('click',closeModal);
+        document.getElementById('modalOverlay').addEventListener('click',function(ev){if(ev.target===this)closeModal()});
+      });
+    });
+    
+    // Charts
+    var allLabels=months.map(function(m,i){return labels2026[i%12]+(i<12?' 26':' 27')});
+    
+    mk('chForecast',{type:'bar',data:{labels:allLabels,datasets:[
+      {label:'Cash In',data:months.map(function(m){return conv(m.cashIn)}),backgroundColor:'#10b981aa',borderRadius:3},
+      {label:'Cash Out',data:months.map(function(m){return-conv(m.cashOut)}),backgroundColor:'#ef444488',borderRadius:3},
+      {label:'Cumulative',data:months.map(function(m){return conv(m.cumulative)}),type:'line',borderColor:'#3b82f6',borderWidth:2.5,pointRadius:2,pointBackgroundColor:'#111827',pointBorderColor:'#3b82f6',tension:.4,order:0}
+    ]},options:{scales:{y:{ticks:{callback:function(v){return fmtF(v/conv(1))}}}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
+    
+    // Breakdown: group items by type per month
+    var payrollData=[];var vendorData=[];var loanData=[];var finData=[];
+    months.forEach(function(m){
+      var pay=0,ven=0,loan=0,fin2=0;
+      m.items_out.forEach(function(it){
+        if(it.type==='payroll') pay+=it.amount;
+        else if(it.type==='loan') loan+=it.amount;
+        else ven+=it.amount;
+      });
+      payrollData.push(conv(pay));vendorData.push(conv(ven));loanData.push(conv(loan));
+    });
+    
+    mk('chForecastBreak',{type:'bar',data:{labels:allLabels,datasets:[
+      {label:'Payroll',data:payrollData,backgroundColor:'#f59e0b88',borderRadius:3},
+      {label:'Vendors',data:vendorData,backgroundColor:'#8b5cf688',borderRadius:3},
+      {label:'Loans',data:loanData,backgroundColor:'#ef444488',borderRadius:3}
+    ]},options:{scales:{y:{stacked:true},x:{stacked:true}},plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}}});
+  }).catch(function(e){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--rd)">Error loading forecast</div>'});
+}
 
 function renderSensitivity(){
   var el=document.getElementById('st-sens');if(!el)return;
@@ -5269,9 +5419,21 @@ function openEmployeeCard(e){
 
   // Employer costs section
   h+='<div class="modal-sep"></div>';
-  h+='<div class="section-label">Employer Costs</div>';
+  h+='<div class="section-label">Salary Additions</div>';
   h+='<div class="modal-grid">';
-  h+='<div class="mf"><label>Social Security (auto)</label><div style="padding:10px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;font-size:14px;color:var(--rd);font-weight:700">'+curSym+(cb.socialSecurity||0).toLocaleString()+'</div><div class="hint">Bituach Leumi: 4.51% up to \u20AA7,703 + 7.6% above</div></div>';
+  h+='<div class="mf"><label>Additional Pay (monthly)</label><input id="me-adds" type="number" value="'+(e.salaryAdditions||0)+'"><div class="hint">Transport, meals, etc.</div></div>';
+  h+='<div class="mf"><label>Description</label><input id="me-addsnote" value="'+(e.salaryAdditionsNote||'')+'" placeholder="e.g. Transport + Phone"></div>';
+  h+='</div>';
+  
+  h+='<div class="modal-sep"></div>';
+  h+='<div class="section-label">Employer Costs</div>';
+  h+='<div style="font-size:10px;color:var(--txM);margin-bottom:6px">Enter 0 to use automatic calculation. Any value > 0 overrides the auto-calc.</div>';
+  h+='<div class="modal-grid">';
+  h+='<div class="mf"><label>Social Security (manual)</label><div style="display:flex;gap:6px;align-items:center"><input id="me-mss" type="number" value="'+(e.manualSS||0)+'" style="flex:1"><span style="font-size:10px;color:var(--txM)">auto: '+curSym+(cb.socialSecurity||0).toLocaleString()+'</span></div><div class="hint">0 = auto-calc from Bituach Leumi rates</div></div>';
+  h+='<div class="mf"><label>Pension (manual)</label><div style="display:flex;gap:6px;align-items:center"><input id="me-mpen" type="number" value="'+(e.manualPension||0)+'" style="flex:1"><span style="font-size:10px;color:var(--txM)">auto: '+curSym+(cb.pension||0).toLocaleString()+'</span></div><div class="hint">0 = auto-calc from pension %</div></div>';
+  h+='<div class="mf"><label>Income Tax (manual)</label><input id="me-mtax" type="number" value="'+(e.manualTax||0)+'"><div class="hint">Employee tax deduction for CF tracking</div></div>';
+  h+='</div>';
+  h+='<div class="modal-grid">';
   h+='<div class="mf"><label>Pension %</label><div style="display:flex;gap:6px;align-items:center"><input id="me-pen" type="number" value="'+(e.pensionPct||8.33)+'" step="0.01" style="flex:1"><span style="font-size:11px;color:var(--ac);white-space:nowrap">= '+curSym+(cb.pension||0).toLocaleString()+'</span></div></div>';
   h+='<div class="mf"><label>Disability Insurance %</label><div style="display:flex;gap:6px;align-items:center"><input id="me-dis" type="number" value="'+(e.disabilityPct||2.5)+'" step="0.01" style="flex:1"><span style="font-size:11px;color:var(--cy);white-space:nowrap">= '+curSym+(cb.disability||0).toLocaleString()+'</span></div></div>';
   h+='<div class="mf"><label>Study Fund %</label><div style="display:flex;gap:6px;align-items:center"><input id="me-sf" type="number" value="'+(e.studyFundPct||7.5)+'" step="0.01" style="flex:1"><span style="font-size:11px;color:var(--am);white-space:nowrap">= '+curSym+(cb.studyFund||0).toLocaleString()+'</span></div></div>';
@@ -5316,7 +5478,12 @@ function openEmployeeCard(e){
       studyFundSalary:parseFloat(document.getElementById('me-sfs').value)||0,
       payNetDate:document.getElementById('me-pnet').value||'',
       payTaxDate:document.getElementById('me-ptax').value||'',
-      payPensionDate:document.getElementById('me-ppen').value||''
+      payPensionDate:document.getElementById('me-ppen').value||'',
+      manualSS:parseFloat(document.getElementById('me-mss').value)||0,
+      manualPension:parseFloat(document.getElementById('me-mpen').value)||0,
+      manualTax:parseFloat(document.getElementById('me-mtax').value)||0,
+      salaryAdditions:parseFloat(document.getElementById('me-adds').value)||0,
+      salaryAdditionsNote:document.getElementById('me-addsnote').value||''
     };
     authFetch('/api/employees/'+e.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){if(!r.ok){return r.text().then(function(t){toast('Error: '+r.status);console.error(t);throw new Error(t)})}return r.json()})

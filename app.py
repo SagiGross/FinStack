@@ -47,24 +47,32 @@ def calc_social_security(gross_ils):
     high_part = max(0, min(gross_ils, SS_HIGH_THRESHOLD) - SS_LOW_THRESHOLD)
     return low_part * SS_LOW_RATE + high_part * SS_HIGH_RATE
 
-def calc_employer_cost(gross, bonus=0, position_pct=100, pension_pct=8.33, disability_pct=2.5, study_fund_pct=7.5, study_fund_salary=0, currency='ILS'):
+def calc_employer_cost(gross, bonus=0, position_pct=100, pension_pct=8.33, disability_pct=2.5, study_fund_pct=7.5, study_fund_salary=0, currency='ILS', manual_ss=0, manual_pension=0, manual_tax=0, salary_additions=0):
     """Calculate total monthly employer cost in original currency."""
-    base = gross * (position_pct / 100.0)
-    # Social security (only for ILS employees)
-    if currency == 'ILS':
-        ss = calc_social_security(base)
+    base = gross * (position_pct / 100.0) + salary_additions
+    # Social security — use manual if set, otherwise calculate
+    if manual_ss > 0:
+        ss = manual_ss
+    elif currency == 'ILS':
+        ss = calc_social_security(base - salary_additions)  # SS on base gross only
     else:
-        ss = base * 0.15  # rough estimate for non-ILS
-    # Pension & disability on gross
-    pension = base * (pension_pct / 100.0)
-    disability = base * (disability_pct / 100.0)
+        ss = base * 0.15
+    # Pension — use manual if set
+    if manual_pension > 0:
+        pension = manual_pension
+    else:
+        pension = (base - salary_additions) * (pension_pct / 100.0)
+    disability = (base - salary_additions) * (disability_pct / 100.0)
     # Study fund on insured salary (or gross if not set)
-    sf_base = study_fund_salary if study_fund_salary > 0 else base
+    sf_base = study_fund_salary if study_fund_salary > 0 else (base - salary_additions)
     study_fund = sf_base * (study_fund_pct / 100.0)
+    # Tax — manual only (not part of employer cost normally, but user wants to track)
+    tax = manual_tax
     # Total
     total = base + ss + pension + disability + study_fund + bonus
     return total, {"gross": base, "socialSecurity": round(ss, 2), "pension": round(pension, 2), 
-                   "disability": round(disability, 2), "studyFund": round(study_fund, 2), "bonus": bonus}
+                   "disability": round(disability, 2), "studyFund": round(study_fund, 2), "bonus": bonus,
+                   "tax": round(tax, 2), "salaryAdditions": salary_additions}
 ML = [f"{m:02d}-{FY}" for m in range(1, 13)]
 JWT_SECRET = os.environ.get("JWT_SECRET", "finstack-secret-key-change-in-production")
 STAGES = ["Initial Contact", "Email Sent", "Demo", "Negotiation", "Signed"]
@@ -108,7 +116,12 @@ def init_db():
             hire_date TEXT NOT NULL, term_date TEXT, is_ghost INTEGER DEFAULT 0,
             pay_net_date TEXT DEFAULT '',
             pay_tax_date TEXT DEFAULT '',
-            pay_pension_date TEXT DEFAULT ''
+            pay_pension_date TEXT DEFAULT '',
+            manual_ss REAL DEFAULT 0,
+            manual_pension REAL DEFAULT 0,
+            manual_tax REAL DEFAULT 0,
+            salary_additions REAL DEFAULT 0,
+            salary_additions_note TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS contracts (
             id TEXT PRIMARY KEY, client TEXT NOT NULL, country TEXT DEFAULT '',
@@ -216,6 +229,7 @@ def init_db():
             contact_phone TEXT DEFAULT '',
             contact_email TEXT DEFAULT '',
             is_recurring INTEGER DEFAULT 0,
+            frequency TEXT DEFAULT 'monthly',
             subject_to_vat INTEGER DEFAULT 0,
             notes TEXT DEFAULT '',
             created_at TEXT
@@ -497,6 +511,12 @@ def auto_migrate():
         ("investments", "annual_rate", "REAL DEFAULT 0"),
         ("pl_manual", "currency", "TEXT DEFAULT 'USD'"),
         ("bs_manual", "currency", "TEXT DEFAULT 'USD'"),
+        ("income_sources", "frequency", "TEXT DEFAULT 'monthly'"),
+        ("employees", "manual_ss", "REAL DEFAULT 0"),
+        ("employees", "manual_pension", "REAL DEFAULT 0"),
+        ("employees", "manual_tax", "REAL DEFAULT 0"),
+        ("employees", "salary_additions", "REAL DEFAULT 0"),
+        ("employees", "salary_additions_note", "TEXT DEFAULT ''"),
         ("salary_snapshots", "net_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "tax_pay_date", "TEXT DEFAULT ''"),
         ("salary_snapshots", "pension_pay_date", "TEXT DEFAULT ''"),
@@ -851,8 +871,12 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
                     esfs = e.get("study_fund_salary", 0)
                     ecur = e.get("currency", "ILS")
                     edept = e["dept"]
+                    e_mss = e.get("manual_ss", 0) or 0
+                    e_mpen = e.get("manual_pension", 0) or 0
+                    e_mtax = e.get("manual_tax", 0) or 0
+                    e_adds = e.get("salary_additions", 0) or 0
                 
-                total_cost, breakdown = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur)
+                total_cost, breakdown = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur, e_mss, e_mpen, e_mtax, e_adds)
                 lab[edept] += to_usd(total_cost, ecur, ml)
                 month_gross += to_usd(breakdown["gross"] + breakdown["bonus"], ecur, ml)
                 month_ss += to_usd(breakdown["socialSecurity"], ecur, ml)
@@ -1157,8 +1181,12 @@ def compute(delay=0, ghosts=0, gs=15000, w=True):
             edis = snap.get("disability_pct",2.5) if snap else e.get("disability_pct",2.5)
             esf = snap.get("study_fund_pct",7.5) if snap else e.get("study_fund_pct",7.5)
             esfs = snap.get("study_fund_salary",0) if snap else e.get("study_fund_salary",0)
+            e_mss2 = e.get("manual_ss", 0) or 0
+            e_mpen2 = e.get("manual_pension", 0) or 0
+            e_mtax2 = e.get("manual_tax", 0) or 0
+            e_adds2 = e.get("salary_additions", 0) or 0
             
-            _, bd = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur)
+            _, bd = calc_employer_cost(eg, eb, ep, epen, edis, esf, esfs, ecur, e_mss2, e_mpen2, e_mtax2, e_adds2)
             
             # Per-employee payment date overrides
             e_net_mi = net_target_mi
@@ -1310,7 +1338,9 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
             e["gross"], e.get("bonus",0), e.get("position_pct",100),
             e.get("pension_pct",8.33), e.get("disability_pct",2.5),
             e.get("study_fund_pct",7.5), e.get("study_fund_salary",0),
-            e.get("currency","ILS"))
+            e.get("currency","ILS"),
+            e.get("manual_ss",0) or 0, e.get("manual_pension",0) or 0,
+            e.get("manual_tax",0) or 0, e.get("salary_additions",0) or 0)
         es.append({"id":e["id"],"name":e["name"],"dept":e["dept"],"gross":e["gross"],
          "positionPct":e.get("position_pct",100),"bonus":e.get("bonus",0),
          "currency":e.get("currency","ILS"),
@@ -1322,7 +1352,10 @@ def get_data(weighted:bool=True, delay:int=0, ghosts:int=0, salary:float=15000):
          "laborCost":round(to_usd(total_cost, e.get("currency","ILS")),2),
          "laborCostMonthly":round(total_cost,2),
          "hireDate":e["hire_date"],"termDate":e["term_date"],
-         "payNetDate":e.get("pay_net_date",""),"payTaxDate":e.get("pay_tax_date",""),"payPensionDate":e.get("pay_pension_date","")})
+         "payNetDate":e.get("pay_net_date",""),"payTaxDate":e.get("pay_tax_date",""),"payPensionDate":e.get("pay_pension_date",""),
+         "manualSS":e.get("manual_ss",0) or 0,"manualPension":e.get("manual_pension",0) or 0,
+         "manualTax":e.get("manual_tax",0) or 0,
+         "salaryAdditions":e.get("salary_additions",0) or 0,"salaryAdditionsNote":e.get("salary_additions_note","") or ""})
     xs=[{"id":x["id"],"dept":x["dept"],"vendor":x["vendor"],"subCat":x["sub_cat"],
          "isCogs":x["is_cogs"]==1,"expenseType":["OpEx","COGS","CapEx"][min(x["is_cogs"],2)],"currency":x.get("currency","ILS"),
          "amount":round(to_usd(sum(x["amounts"].values())/max(len(x["amounts"]),1), x.get("currency","ILS")),2),
@@ -1554,6 +1587,9 @@ class EmployeeUpdate(BaseModel):
     pensionPct:Optional[float]=None; disabilityPct:Optional[float]=None
     studyFundPct:Optional[float]=None; studyFundSalary:Optional[float]=None
     payNetDate:Optional[str]=None; payTaxDate:Optional[str]=None; payPensionDate:Optional[str]=None
+    manualSS:Optional[float]=None; manualPension:Optional[float]=None
+    manualTax:Optional[float]=None
+    salaryAdditions:Optional[float]=None; salaryAdditionsNote:Optional[str]=None
 
 @app.put("/api/employees/{eid}")
 def upd_employee(eid:str, b:EmployeeUpdate, user=Depends(require_admin)):
@@ -1572,6 +1608,11 @@ def upd_employee(eid:str, b:EmployeeUpdate, user=Depends(require_admin)):
     if b.payNetDate is not None: fields.append("pay_net_date=?"); vals.append(b.payNetDate)
     if b.payTaxDate is not None: fields.append("pay_tax_date=?"); vals.append(b.payTaxDate)
     if b.payPensionDate is not None: fields.append("pay_pension_date=?"); vals.append(b.payPensionDate)
+    if b.manualSS is not None: fields.append("manual_ss=?"); vals.append(b.manualSS)
+    if b.manualPension is not None: fields.append("manual_pension=?"); vals.append(b.manualPension)
+    if b.manualTax is not None: fields.append("manual_tax=?"); vals.append(b.manualTax)
+    if b.salaryAdditions is not None: fields.append("salary_additions=?"); vals.append(b.salaryAdditions)
+    if b.salaryAdditionsNote is not None: fields.append("salary_additions_note=?"); vals.append(b.salaryAdditionsNote)
     if not fields: return {"ok":True}
     vals.append(eid)
     with get_db() as db:
@@ -2735,6 +2776,181 @@ def set_bs_data(b: BSDataUpdate, user=Depends(require_admin)):
         db.execute("INSERT OR REPLACE INTO bs_manual (year, month, category, section, amount, currency) VALUES (?,?,?,?,?,?)",
                    (b.year, b.month, b.category, section, b.amount, b.currency))
     return {"ok": True}
+
+# ══════════════════════════════════════════
+# FORECAST (24-month projection)
+# ══════════════════════════════════════════
+@app.get("/api/forecast")
+def get_forecast(user=Depends(require_admin)):
+    """Build 24-month forecast from recurring items + known events."""
+    from datetime import date, timedelta
+    rate = get_exchange_rate()
+    
+    # Month range: Jan 2026 - Dec 2027
+    months = []
+    for y in [2026, 2027]:
+        for m in range(1, 13):
+            ml = f"{m:02d}-{y}"
+            months.append({"year": y, "month": m, "label": ml,
+                           "cashIn": 0, "cashOut": 0, "items_in": [], "items_out": []})
+    
+    def month_idx(y, m):
+        if y == 2026: return m - 1
+        elif y == 2027: return 12 + m - 1
+        return -1
+    
+    def should_fire(start_month, start_year, target_month, target_year, freq):
+        """Check if a recurring item fires in target month."""
+        if target_year < start_year or (target_year == start_year and target_month < start_month):
+            return False
+        delta = (target_year - start_year) * 12 + (target_month - start_month)
+        if freq == "monthly": return True
+        elif freq == "quarterly": return delta % 3 == 0
+        elif freq == "semi_annual": return delta % 6 == 0
+        elif freq == "annual": return delta % 12 == 0
+        return False
+    
+    def to_usd(amount, currency):
+        if currency == "ILS": return amount / rate
+        return amount
+    
+    # 1. Recurring expenses
+    expenses = load_expenses()
+    for x in expenses:
+        if not x.get("is_recurring"): continue
+        freq = x.get("frequency", "monthly")
+        cur = x.get("currency", "ILS")
+        vendor = x.get("vendor", "Unknown")
+        cat = x.get("service_desc") or x.get("sub_cat") or "Expense"
+        
+        # Find last invoice to get latest amount
+        try:
+            with get_db() as db:
+                last_inv = db.execute(
+                    "SELECT amount, invoice_date FROM expense_payments WHERE expense_id=? ORDER BY invoice_date DESC LIMIT 1",
+                    (x["id"],)).fetchone()
+        except: last_inv = None
+        
+        if last_inv and last_inv["amount"]:
+            amt = last_inv["amount"]
+            # Determine start month from last invoice
+            try:
+                d = date.fromisoformat(last_inv["invoice_date"])
+                start_m, start_y = d.month, d.year
+            except:
+                start_m, start_y = 1, 2026
+        else:
+            continue  # No invoices = skip
+        
+        amt_usd = to_usd(amt, cur)
+        for mi, mo in enumerate(months):
+            if should_fire(start_m, start_y, mo["month"], mo["year"], freq):
+                mo["cashOut"] += amt_usd
+                mo["items_out"].append({"type": "expense", "name": vendor, "category": cat, "amount": round(amt_usd, 2), "currency": cur, "raw": amt})
+    
+    # 2. Recurring income
+    try:
+        income_sources = load_income_sources()
+    except: income_sources = []
+    
+    for inc in income_sources:
+        if not inc.get("is_recurring"): continue
+        freq = inc.get("frequency", "monthly") or "monthly"
+        cur = inc.get("currency", "ILS")
+        client = inc.get("client", "Unknown")
+        cat = inc.get("category", "Revenue")
+        
+        # Find last payment to get latest amount
+        try:
+            with get_db() as db:
+                last_pay = db.execute(
+                    "SELECT amount, invoice_date FROM income_payments WHERE income_id=? ORDER BY invoice_date DESC LIMIT 1",
+                    (inc["id"],)).fetchone()
+        except: last_pay = None
+        
+        if last_pay and last_pay["amount"]:
+            amt = last_pay["amount"]
+            try:
+                d = date.fromisoformat(last_pay["invoice_date"])
+                start_m, start_y = d.month, d.year
+            except:
+                start_m, start_y = 1, 2026
+        else:
+            continue
+        
+        amt_usd = to_usd(amt, cur)
+        for mi, mo in enumerate(months):
+            if should_fire(start_m, start_y, mo["month"], mo["year"], freq):
+                mo["cashIn"] += amt_usd
+                mo["items_in"].append({"type": "income", "name": client, "category": cat, "amount": round(amt_usd, 2), "currency": cur, "raw": amt})
+    
+    # 3. Payroll (always monthly, from current employees)
+    employees = load_employees()
+    total_labor_usd = 0
+    emp_items = []
+    for emp in employees:
+        labor = emp.get("total_labor_usd") or emp.get("labor_cost_usd") or 0
+        if labor > 0:
+            total_labor_usd += labor
+            emp_items.append({"type": "payroll", "name": emp.get("name", "Employee"), "category": "Payroll", "amount": round(labor, 2)})
+    
+    for mo in months:
+        mo["cashOut"] += total_labor_usd
+        mo["items_out"].extend(emp_items)
+    
+    # 4. Loans — scheduled payments
+    loans = load_loans()
+    for ln in loans:
+        sch = calc_loan_schedule(ln["amount"], ln["term_months"], ln["annual_rate"], ln["start_date"], ln["repayment_type"], ln.get("interest_start_month", ""))
+        cur = ln.get("currency", "ILS")
+        for s in sch:
+            try:
+                pd = date.fromisoformat(s["date"])
+                mi2 = month_idx(pd.year, pd.month)
+                if 0 <= mi2 < 24 and s["payment"] > 0:
+                    amt_usd = to_usd(s["payment"], cur)
+                    months[mi2]["cashOut"] += amt_usd
+                    months[mi2]["items_out"].append({"type": "loan", "name": ln["lender"], "category": "Loan Payment", "amount": round(amt_usd, 2), "currency": cur, "raw": s["payment"]})
+            except: pass
+    
+    # 5. Investments — known future payments
+    try:
+        with get_db() as db:
+            invs = db.execute("SELECT * FROM investments").fetchall()
+            for inv in invs:
+                pay_date = inv["payment_date"] or inv["investment_date"]
+                if pay_date:
+                    try:
+                        pd = date.fromisoformat(pay_date)
+                        mi3 = month_idx(pd.year, pd.month)
+                        if 0 <= mi3 < 24:
+                            amt_usd = to_usd(inv["amount"], inv["currency"] or "ILS")
+                            months[mi3]["cashIn"] += amt_usd
+                            months[mi3]["items_in"].append({"type": "investment", "name": inv["investor"], "category": "Investment", "amount": round(amt_usd, 2)})
+                    except: pass
+    except: pass
+    
+    # Build cumulative + net
+    cum = 0
+    # Start with current compute() cash position for Jan 2026
+    try:
+        summary = compute()
+        if summary and len(summary) > 0:
+            # Use Dec cash as starting point... but forecast starts from Jan
+            # Actually we want opening balance
+            pass
+    except: pass
+    
+    for mo in months:
+        mo["cashOut"] = round(mo["cashOut"], 2)
+        mo["cashIn"] = round(mo["cashIn"], 2)
+        mo["net"] = round(mo["cashIn"] - mo["cashOut"], 2)
+        cum += mo["net"]
+        mo["cumulative"] = round(cum, 2)
+        # Clean items for JSON
+        mo["itemCount"] = len(mo["items_in"]) + len(mo["items_out"])
+    
+    return {"months": months, "rate": rate}
 
 # OPENING BALANCES (prior year payroll liabilities)
 # ══════════════════════════════════════════
